@@ -16,11 +16,8 @@
 # Ignoring files
 # Facebook and Google Ids
 [Ff]acebook[Ss]ettings.asset
-[Ff]acebook[Ss]ettings.asset.meta
 [Cc]onstant[Ii]ds.cs
-[Cc]onstant[Ii]ds.cs.meta
 [Gg][Pp][Gg][Ss][Ii]ds.cs
-[Gg][Pp][Gg][Ss][Ii]ds.cs.meta
 
 # MemoryCaptures can get excessive in size.
 # They also could contain extremely sensitive data
