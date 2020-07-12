@@ -48,7 +48,9 @@ namespace OneDevApp
         [SerializeField] private Image BackgroundImage = null;
         [SerializeField] private Image TipsTextImage = null;
         [SerializeField] private Text TipText = null;
-        [SerializeField] private GameObject ContinueOrAnyKeyUI = null;
+        [SerializeField] private GameObject ContinueAnyKeyUI = null;
+        [SerializeField] private GameObject ContinueButtonUI = null;
+        [SerializeField] private GameObject ProgressUI = null;
         [SerializeField] private Text ProgressText = null;
         [SerializeField] private Slider LoadBarSlider = null;
         [SerializeField] private RectTransform LoadingCircle = null;
@@ -123,7 +125,7 @@ namespace OneDevApp
 
             if (LoadBarSlider != null) { LoadingBarAlpha = LoadBarSlider.GetComponent<CanvasGroup>(); }
 
-            SetupUI();
+            //SetupUI();
         }
 
         /// <summary>
@@ -137,7 +139,8 @@ namespace OneDevApp
                 return;
 
             UpdateUI();
-            LoadingRotator();
+            if(LoadingCircle.gameObject.activeInHierarchy)
+                LoadingRotator();
             SkipWithKey();
         }
 
@@ -162,11 +165,20 @@ namespace OneDevApp
             if (TipsTextAlpha != null) TipsTextAlpha.alpha = 0;
             if (LoadingCircleCanvas != null) LoadingCircleCanvas.alpha = 1;
 
+            ProgressUI.gameObject.SetActive(true);
+
             if (FlashImage != null) { FlashImage.SetActive(false); }
 
-            if (ContinueOrAnyKeyUI != null)
+            if (ContinueAnyKeyUI != null)
             {
-                ContinueOrAnyKeyUI.SetActive(false);
+                ContinueAnyKeyUI.SetActive(false);
+            }
+
+            if (ContinueButtonUI != null)
+            {
+                ContinueButtonUI.SetActive(false);
+                ContinueButtonUI.GetComponentInChildren<Button>().onClick.RemoveAllListeners();
+                ContinueButtonUI.GetComponentInChildren<Button>().onClick.AddListener(() => LoadNextScene());
             }
 
             if (BackgroundImage != null && useBackgrounds)
@@ -260,11 +272,19 @@ namespace OneDevApp
             switch (sceneLoaderType)
             {
                 case SceneLoaderType.Button:
-                    if (ContinueOrAnyKeyUI != null) { ContinueOrAnyKeyUI.SetActive(true); }
+                    if (ContinueButtonUI != null)
+                    {
+                        ContinueButtonUI.SetActive(true);
+                        ProgressUI.SetActive(false);
+                    }
                     break;
                 case SceneLoaderType.AnyKey:
                     canSkipWithKey = true;
-                    if (ContinueOrAnyKeyUI != null) { ContinueOrAnyKeyUI.SetActive(true); }
+                    if (ContinueAnyKeyUI != null)
+                    {
+                        ContinueAnyKeyUI.SetActive(true);
+                        ProgressUI.SetActive(false);
+                    }
                     break;
                 case SceneLoaderType.Instant:
                 default:

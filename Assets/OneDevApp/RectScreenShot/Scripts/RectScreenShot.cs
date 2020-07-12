@@ -5,7 +5,7 @@ using UnityEngine.UI;
 
 namespace OneDevApp
 {
-    public class RectScreenShot : MonoBehaviour
+    public class RectScreenShot : MonoInstance<RectScreenShot>
     {
         #region Public variables
         [Tooltip("The RectTransform which need to captured if null, then Full screenshot will be capture")]
@@ -25,42 +25,43 @@ namespace OneDevApp
         private Vector2 offsetMaxValues;
         private Vector3 localScaleValues;
         #endregion
-
-        // Update is called once per frame
-        void Update()
+        
+        public void CaputureScreenShot(string imageFilePath)
         {
-            if (Input.GetKeyDown(KeyCode.Space))
+            // Verify required argument
+            if (imageFilePath == null || string.IsNullOrEmpty(imageFilePath))
+                return;
+
+            imageFilePath = getFilePath(imageFilePath);
+
+            if (rectTransform != null)
             {
-                if (rectTransform != null)
+                if (rectTransform.root.GetComponent<CanvasScaler>().uiScaleMode == CanvasScaler.ScaleMode.ScaleWithScreenSize)
                 {
-                    if (rectTransform.root.GetComponent<CanvasScaler>().uiScaleMode == CanvasScaler.ScaleMode.ScaleWithScreenSize)
+                    if (rectTransform.root.GetComponent<CanvasScaler>().screenMatchMode != CanvasScaler.ScreenMatchMode.MatchWidthOrHeight ||
+                        rectTransform.root.GetComponent<CanvasScaler>().matchWidthOrHeight != 0.5f)
                     {
-                        if (rectTransform.root.GetComponent<CanvasScaler>().screenMatchMode != CanvasScaler.ScreenMatchMode.MatchWidthOrHeight ||
-                            rectTransform.root.GetComponent<CanvasScaler>().matchWidthOrHeight != 0.5f)
-                        {
-                            Debug.LogWarning("UI may not look the same due to Canvas Scaler either screenMatchMode was not set MatchWidthOrHeight or MatchWidthOrHeight is not set to 0.5f");
-                        }
-                        createCanvasWithRectTransform();
+                        Debug.LogWarning("UI may not look the same due to Canvas Scaler either screenMatchMode was not set MatchWidthOrHeight or MatchWidthOrHeight is not set to 0.5f");
                     }
-                    else if (rectTransform.root.GetComponent<CanvasScaler>().uiScaleMode == CanvasScaler.ScaleMode.ConstantPixelSize)
-                    {
-                        StartCoroutine(takeScreenShot());
-                    }
-                    else
-                    {
-                        Debug.LogWarning("Canvas Scaler mode not supported.");
-                    }
+                    createCanvasWithRectTransform(imageFilePath);
+                }
+                else if (rectTransform.root.GetComponent<CanvasScaler>().uiScaleMode == CanvasScaler.ScaleMode.ConstantPixelSize)
+                {
+                    StartCoroutine(takeScreenShot(imageFilePath));
                 }
                 else
                 {
-                    Debug.Log("Rect transform is null to capture the screenshot, hence fullscreen has been taken.");
-                    ScreenCapture.CaptureScreenshot("FullPageScreenShot.png");
+                    Debug.LogWarning("Canvas Scaler mode not supported.");
                 }
             }
-
+            else
+            {
+                Debug.Log("Rect transform is null to capture the screenshot, hence fullscreen has been taken.");
+                ScreenCapture.CaptureScreenshot("FullPageScreenShot.png");
+            }
         }
 
-        private void createCanvasWithRectTransform()
+        private void createCanvasWithRectTransform(string imageFilePath)
         {
             rectTransformParent = rectTransform.parent; //Assigning Parent transform to reasign after usage
 
@@ -87,10 +88,10 @@ namespace OneDevApp
 
             Canvas.ForceUpdateCanvases();   // Forcing all canvas to update the UI
 
-            StartCoroutine(takeScreenShot());   //Once everything was set ready, Capture the screenshot
+            StartCoroutine(takeScreenShot(imageFilePath));   //Once everything was set ready, Capture the screenshot
         }
 
-        private IEnumerator takeScreenShot()
+        private IEnumerator takeScreenShot(string imageFilePath)
         {
             yield return new WaitForEndOfFrame(); // it must be a coroutine 
 
@@ -115,7 +116,7 @@ namespace OneDevApp
             Destroy(tex);
 
             //Writing bytes to a file
-            File.WriteAllBytes(Application.dataPath + "/ScreenShotRect/ScreenShot.png", bytes);
+            File.WriteAllBytes(imageFilePath, bytes);
 
             //In case of ScaleMode was not ScaleWithScreenSize, parent will not be assigned then no need to revert the changes
             if (rectTransformParent != null)
@@ -136,6 +137,14 @@ namespace OneDevApp
             Debug.Log("Picture taken");
         }
 
+        // Get path for given CSV file
+        private string getFilePath(string path)
+        {
+#if UNITY_EDITOR
+            return Application.dataPath + path;
+#elif UNITY_ANDROID
+        return Application.persistentDataPath+path;
+#endif
+        }
     }
-
 }

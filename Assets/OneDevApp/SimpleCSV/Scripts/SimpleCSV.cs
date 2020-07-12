@@ -146,13 +146,9 @@ namespace OneDevApp
         private string getFilePath(string path)
         {
 #if UNITY_EDITOR
-            return Application.dataPath + "/SimpleCSV/Demo/" + path;
+            return Application.dataPath + path;
 #elif UNITY_ANDROID
         return Application.persistentDataPath+path;
-#elif UNITY_IPHONE
-        return Application.persistentDataPath+"/"+path;
-#else
-        return Application.dataPath +"/"+path;
 #endif
         }
     }

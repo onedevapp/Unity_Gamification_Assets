@@ -30,15 +30,9 @@ namespace OneDevApp
         // Needed Constants
         private const string LAST_REWARD_TIME = "LastRewardTimeHR";
         private const string FMT = "O";
-
-        void Start()
-        {
-            // Initializes the timer with the current time        
-            InitializeDate();
-        }
-
+        
         // Initializes the current DateTime. If the player is using the World Clock initializes it
-        private void InitializeDate()
+        public void Initialize()
         {
             isInitialized = false;
             CanUserGetReward = false;

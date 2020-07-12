@@ -24,16 +24,19 @@ public class HourlyRewardsUIDemo : MonoBehaviour
     HourlyRewardsManager rewardsManager;
 
     public DailyRewardState state = DailyRewardState.UNCLAIMED_UNAVAILABLE;
-
-    private void Awake()
-    {
-        rewardsManager = HourlyRewardsManager.Instance;
-    }
-
+    
     // Start is called before the first frame update
     void Start()
     {
+        rewardsManager = HourlyRewardsManager.Instance;
+
         isRewardToBeClaimed = false;
+
+        rewardsManager.onClaimPrize += OnClaimPrize;
+        rewardsManager.onReadyClaimPrize += onReadyClaimPrize;
+        rewardsManager.onInitialize += OnInitialize;
+
+        buttonClaim.interactable = false;
 
         buttonClaim.onClick.AddListener(() =>
         {
@@ -44,6 +47,8 @@ public class HourlyRewardsUIDemo : MonoBehaviour
                 rewardsManager.ClaimPrize();
             }
         });
+
+        rewardsManager.Initialize();
     }
 
     private void UpdateUI(DailyRewardState state)
@@ -61,15 +66,6 @@ public class HourlyRewardsUIDemo : MonoBehaviour
                 imageReward.sprite = spriteRewardUnLocked;
                 break;
         }
-    }
-
-    void OnEnable()
-    {
-        rewardsManager.onClaimPrize += OnClaimPrize;
-        rewardsManager.onInitialize += OnInitialize;
-        rewardsManager.onReadyClaimPrize += onReadyClaimPrize;
-
-        buttonClaim.interactable = false;
     }
 
     void OnDisable()

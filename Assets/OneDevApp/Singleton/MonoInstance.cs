@@ -2,7 +2,7 @@
 
 namespace OneDevApp
 {
-    public class MonoInstance<T> : MonoBehaviour where T : MonoBehaviour
+    public abstract class MonoInstance<T> : MonoBehaviour where T : MonoBehaviour
     {
         /// <summary>
         /// The is persistence.
