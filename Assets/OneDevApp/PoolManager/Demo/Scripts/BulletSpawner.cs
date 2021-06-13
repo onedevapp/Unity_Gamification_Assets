@@ -30,7 +30,7 @@ public class BulletSpawner : MonoBehaviour {
         //PoolObjects _pooledObject = PoolManagerScript.singleton.GetObjectFromPool(item.objectToPool);
 
         //To a random item from the poolable list
-        PoolObjects _pooledObject = PoolManager.Instance.GetObjectFromPool(PoolManager.Instance.itemsToPool[Random.value > 0.5 ? 0 : 1].objectToPool);
+        PoolObjects _pooledObject = PoolManager.Instance.GetObjectFromPool(PoolManager.Instance.itemsToPool[Random.value > 0.5 ? 0 : 1].itemName);
 
         //Enabling item from the pool
         PoolManager.Instance.EnableObjectFromPool(_pooledObject, PoolManager.Instance.parentGameObject.transform.position, PoolManager.Instance.parentGameObject.transform.rotation);

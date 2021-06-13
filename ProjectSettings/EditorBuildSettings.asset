@@ -5,16 +5,16 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 0
+  - enabled: 1
     path: Assets/OneDevApp/Facebook/Demo/Facebook.unity
     guid: a8a6688ddeb35424c804faf83e54d000
-  - enabled: 1
+  - enabled: 0
     path: Assets/OneDevApp/SceneLoader/Demo/Scene/SceneLoaderA.unity
     guid: 3ed1003c1645eb742926e75568de27da
-  - enabled: 1
+  - enabled: 0
     path: Assets/OneDevApp/SceneLoader/Demo/Scene/SceneLoaderB.unity
     guid: 535885938cb1aba489460f1933c94f3d
-  - enabled: 1
+  - enabled: 0
     path: Assets/OneDevApp/Location/Demo/Scenes/LocationDemo.unity
     guid: 1fd896a82403f964c98ab7b844b87b22
   m_configObjects: {}

@@ -31,66 +31,100 @@ namespace OneDevApp
 
     public class WebApiManager : MonoInstance<WebApiManager>
     {
-        public delegate void ReqCallback(bool isNetworkError, bool isHttpError, string error, string body);
+        public delegate void ReqCallback(bool isSuccess, string error, string body);
+        public delegate void ReqCallbackTex(bool isSuccess, string error, Texture2D imageTex);
+        private const int timeOut = 45;
 
-        public void GetJsonNetWorkCall(string uri, string bodyJsonString, ReqCallback callback)
+        public void GetJsonNetWorkCall(string uri, string bodyJsonString, ReqCallback callback, int timeout = timeOut)
         {
-            GetNetWorkCall(NetworkCallType.POST_METHOD_USING_JSONDATA, uri, bodyJsonString, null, callback);
+            GetNetWorkCall(NetworkCallType.POST_METHOD_USING_JSONDATA, uri, bodyJsonString, null, callback, timeout);
         }
 
-        public void GetNetWorkCall(NetworkCallType callType, string uri, List<KeyValuePojo> parameters, ReqCallback callback)
+        public void GetNetWorkCall(NetworkCallType callType, string uri, List<KeyValuePojo> parameters, ReqCallback callback, int timeout = timeOut)
         {
             string bodyJsonString = string.Empty;
 
             if (callType == NetworkCallType.POST_METHOD_USING_JSONDATA)
                 bodyJsonString = getEncodedParams(parameters);
 
-            GetNetWorkCall(callType, uri, bodyJsonString, parameters, callback);
+            GetNetWorkCall(callType, uri, bodyJsonString, parameters, callback, timeout);
+        }
+        public void GetDownloadImage(string uri, ReqCallbackTex callback, int timeout = timeOut)
+        {
+            StartCoroutine(DownloadImage(uri, callback, timeout));
         }
 
-        private void GetNetWorkCall(NetworkCallType callType, string uri, string bodyJsonString, List<KeyValuePojo> parameters, ReqCallback callback)
+        private void GetNetWorkCall(NetworkCallType callType, string uri, string bodyJsonString, List<KeyValuePojo> parameters, ReqCallback callback, int timeout = timeOut)
         {
             switch (callType)
             {
                 case NetworkCallType.GET_METHOD:
-                    StartCoroutine(RequestGetMethod(uri, parameters, callback));
+                    StartCoroutine(RequestGetMethod(uri, parameters, callback, timeout));
                     break;
                 case NetworkCallType.POST_METHOD_USING_JSONDATA:
-                    StartCoroutine(PostRequestUsingJSON(uri, bodyJsonString, callback));
+                    StartCoroutine(PostRequestUsingJSON(uri, bodyJsonString, callback, timeout));
                     break;
                 case NetworkCallType.POST_METHOD_USING_FORMDATA:
-                    StartCoroutine(PostRequestUsingForm(uri, parameters, callback));
+                    StartCoroutine(PostRequestUsingForm(uri, parameters, callback, timeout));
                     break;
             }
         }
 
 
-        private IEnumerator RequestGetMethod(string url, List<KeyValuePojo> parameters, ReqCallback callback)
+        private IEnumerator RequestGetMethod(string url, List<KeyValuePojo> parameters, ReqCallback callback, int timeout = timeOut)
         {
             string getParameters = getEncodedParams(parameters);
 
             using (UnityWebRequest www = UnityWebRequest.Get(url + getParameters))
             {
+                www.timeout = timeout;
                 //Send request
                 yield return www.SendWebRequest();
+
+                while (!www.isDone)
+                    yield return www;
+
+                while (!www.downloadHandler.isDone)
+                    yield return null;
+
                 //Return result
-                callback(www.isNetworkError, www.isHttpError, www.error, www.downloadHandler.text);
+
+#if UNITY_2020_1_OR_NEWER
+                callback(www.result == UnityWebRequest.Result.Success, www.error, www.downloadHandler.text);
+#else
+                callback(www.isDone, www.error, www.downloadHandler.text);
+#endif
             }
         }
 
-        private IEnumerator PostRequestUsingJSON(string url, string bodyJsonString, ReqCallback callback)
+        private IEnumerator PostRequestUsingJSON(string url, string bodyJsonString, ReqCallback callback, int timeout = timeOut)
         {
             using (UnityWebRequest www = UnityWebRequest.Post(url, bodyJsonString))
             {
+                www.timeout = timeout;
+
                 byte[] bodyRaw = new System.Text.UTF8Encoding().GetBytes(bodyJsonString);
                 www.uploadHandler = new UploadHandlerRaw(bodyRaw);
                 www.SetRequestHeader("Content-Type", "application/json");
                 yield return www.SendWebRequest();
-                callback(www.isNetworkError, www.isHttpError, www.error, www.downloadHandler.text);
+
+                while (!www.isDone)
+                    yield return www;
+
+                while (!www.downloadHandler.isDone)
+                    yield return null;
+                callback(www.isDone, www.error, www.downloadHandler.text);
+
+                //Return result
+#if UNITY_2020_1_OR_NEWER
+                callback(www.result == UnityWebRequest.Result.Success, www.error, www.downloadHandler.text);
+#else
+                callback(www.isDone, www.error, www.downloadHandler.text);
+#endif
             }
         }
 
-        private IEnumerator PostRequestUsingForm(string url, List<KeyValuePojo> parameters, ReqCallback callback)
+        private IEnumerator PostRequestUsingForm(string url, List<KeyValuePojo> parameters, ReqCallback callback, int timeout = timeOut)
         {
             WWWForm bodyFormData = new WWWForm();
             foreach (KeyValuePojo items in parameters)
@@ -100,8 +134,44 @@ namespace OneDevApp
 
             using (UnityWebRequest www = UnityWebRequest.Post(url, bodyFormData))
             {
+                www.timeout = timeout;
                 yield return www.SendWebRequest();
-                callback(www.isNetworkError, www.isHttpError, www.error, www.downloadHandler.text);
+
+                while (!www.isDone)
+                    yield return www;
+
+                while (!www.downloadHandler.isDone)
+                    yield return null;
+
+                //Return result
+#if UNITY_2020_1_OR_NEWER
+                callback(www.result == UnityWebRequest.Result.Success, www.error, www.downloadHandler.text);
+#else
+                callback(www.isDone, www.error, www.downloadHandler.text);
+#endif
+            }
+        }
+
+        private IEnumerator DownloadImage(string url, ReqCallbackTex callback, int timeout = timeOut)
+        {
+            using (UnityWebRequest www = UnityWebRequestTexture.GetTexture(url))
+            {
+                www.timeout = timeout;
+                yield return www.SendWebRequest();
+
+                while (!www.isDone)
+                    yield return www;
+
+                while (!www.downloadHandler.isDone)
+                    yield return null;
+
+                //Return result
+#if UNITY_2020_1_OR_NEWER
+                callback(www.result == UnityWebRequest.Result.Success, www.error, ((DownloadHandlerTexture)www.downloadHandler).texture);
+#else
+                callback(www.isDone, www.error, ((DownloadHandlerTexture)www.downloadHandler).texture);
+#endif
+
             }
         }
 

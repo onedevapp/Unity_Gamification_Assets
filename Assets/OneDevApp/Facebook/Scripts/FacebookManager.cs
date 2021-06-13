@@ -1,28 +1,44 @@
 ﻿using Facebook.Unity;
+using SimpleJSON;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.UI;
 
 namespace OneDevApp
 {
+    [Serializable]
+    public struct FacebookDetailsResult
+    {
+        public string accessToken;
+        public string profileUserId;
+        public string profileName;
+        public string profileFirstName;
+        public Sprite profilePic;
+    }
+
     public class FacebookManager : MonoInstance<FacebookManager>
     {
         #region Public Variables
-        public Text m_LoginBtnText;
-        public Text m_UserNameText;
-        public Image m_UserProfileImage;
-        public GameObject m_FriendListItem;
-        public GameObject m_ScoreListItem;
+        public Action OnFBInit;
 
-        public GameObject m_ListPanel;
-        public Transform m_ListItemParent;
+        public FacebookDetailsResult facebookDetails;
+        public bool isLoggedIn
+        {
+            get
+            {
+                return FB.IsLoggedIn;
+            }
+        }
         #endregion
 
 
         #region FB Init
         protected override void Awake()
         {
+            base.Awake();
             if (!FB.IsInitialized)
             {
                 FB.Init(() =>
@@ -30,7 +46,7 @@ namespace OneDevApp
                     if (FB.IsInitialized)
                         SetInit();
                     else
-                        Debug.LogError("Couldn't initialize");
+                        Debug.LogError("FB Couldn't initialize");
                 },
                 isGameShown =>
                 {
@@ -46,283 +62,381 @@ namespace OneDevApp
 
         private void SetInit()
         {
-            Debug.Log("FB Init done");
             FB.ActivateApp();
-            ToggleFBMenus(FB.IsLoggedIn);
-        }
-
-        private void ToggleFBMenus(bool isLoggedIn)
-        {
-            if (isLoggedIn)
-            {
-                //get profile picture
-                FB.API(GetPictureURL("me", 128, 128), HttpMethod.GET, GetProfilePictureCallBack);
-
-                //get username
-                FB.API("/me?fields=id,first_name", HttpMethod.GET, GetUserNameCallBack);
-            }
-
-            ToggleUIElementsInteractable(isLoggedIn);
-        }
-
-        private void ToggleUIElementsInteractable(bool isInteractable)
-        {
-            if (isInteractable)
-            {
-                m_LoginBtnText.text = "Logout";
-            }
-            else
-            {
-                m_LoginBtnText.text = "Login";
-            }
+            if (OnFBInit != null) OnFBInit.Invoke();
         }
 
         #endregion
 
         #region Login / Logout
-        public void ToggleFacebookLogin()
+        public void FacebookLogout()
         {
             if (FB.IsLoggedIn)
             {
                 FB.LogOut();
             }
+        }
+
+        public void FacebookLogIn(Action<FacebookDetailsResult> success, Action<string> error)
+        {
+            if (FB.IsLoggedIn)
+            {
+                InitSession(success, error);
+            }
             else
             {
-                var permissions = new List<string>() { "public_profile", "email", "user_friends" };
-                FB.LogInWithReadPermissions(permissions, LogInAuthCallback);
+                var permissions = new List<string>() { "public_profile", "user_friends", "gaming_user_picture", "gaming_profile", "email" };
+                FB.LogInWithReadPermissions(permissions, (result) =>
+                {
+                    if (result.Error == null)
+                    {
+                        InitSession(success, error);
+                    }
+                    else
+                    {
+                        if (error != null)
+                            error.Invoke(result.Error);
+                    }
+                });
             }
         }
 
-        void LogInAuthCallback(IResult result)
+        private void InitSession(Action<FacebookDetailsResult> success, Action<string> error)
         {
-            if (result.Error == null)
-            {
-                Debug.Log("FB login has no error.");
-                ToggleFBMenus(FB.IsLoggedIn);
-            }
-            else
-            {
-                Debug.Log("Error during login: " + result.Error);
-            }
+            facebookDetails = new FacebookDetailsResult();
+            //get profile picture
+            GetProfilePicFB("me", (Sprite pic) => { 
+                facebookDetails.profilePic = pic;
+                //get username
+                GetPublicDetailsFB("me", (IDictionary<string, object> result) => {
+
+                    facebookDetails.profileUserId = AccessToken.CurrentAccessToken.UserId;
+                    facebookDetails.accessToken = AccessToken.CurrentAccessToken.TokenString;
+
+                    facebookDetails.profileFirstName = result["first_name"].ToString();
+                    facebookDetails.profileName = result["name"].ToString();
+
+                    if (success != null)
+                        success.Invoke(facebookDetails);
+                }, (string errorMessage) => {
+                    if (error != null)
+                        error.Invoke(errorMessage);
+                });
+            }, (string errorMessage) => {
+                if (error != null)
+                    error.Invoke(errorMessage);
+            });
+            
+
         }
         #endregion
 
-        #region User Details
-        void GetProfilePictureCallBack(IGraphResult result)
+        #region User Details       
+        private void GetPublicProfilePicFB(string facebookID, Action<Sprite> onSuccess, Action<string> onError)
         {
-            if (result.Error != null)
+            ///Need to upadte to OCT 2020 version, which requires access token to get the profile pic
+            //https://graph.facebook.com/oauth/access_token?client_id={your-app-id}&client_secret={your-app-secret}&grant_type=client_credentials
+            //https://graph.facebook.com/{profile_id}/picture?type=large&access_token={app_access_token}
+            StartCoroutine(getPublicProfilePicFB(facebookID, onSuccess, onError));
+        }
+
+        private IEnumerator getPublicProfilePicFB(string facebookID, Action<Sprite> onSuccess, Action<string> onError)
+        {
+
+            using (UnityWebRequest wwwAccessToken = UnityWebRequest.Get("https://graph.facebook.com/oauth/access_token?client_id=" + ConstantIds.FB_APP_ID + "&client_secret=" + ConstantIds.FB_APP_SECRET + "&grant_type=client_credentials"))
             {
-                Debug.Log("Error during profile picture");
-                return;
-            }
-            else
-            {
-                m_UserProfileImage.sprite = CreateSprite(result.Texture);
+                wwwAccessToken.timeout = 30;
+                //Send request
+                yield return wwwAccessToken.SendWebRequest();
+
+                while (!wwwAccessToken.isDone)
+                    yield return wwwAccessToken;
+
+                while (!wwwAccessToken.downloadHandler.isDone)
+                    yield return null;
+
+                if (wwwAccessToken.result == UnityWebRequest.Result.Success)
+                {
+
+                    JSONNode result = JSONNode.Parse(wwwAccessToken.downloadHandler.text);
+
+                    using (UnityWebRequest www = UnityWebRequestTexture.GetTexture("https://graph.facebook.com/"+ facebookID + "/picture?type=large&access_token="+ result["access_token"]))
+                    {
+                        www.timeout = 30;
+                        //Send request
+                        yield return www.SendWebRequest();
+
+                        while (!www.isDone)
+                            yield return www;
+
+                        while (!www.downloadHandler.isDone)
+                            yield return null;
+
+                        if (www.result == UnityWebRequest.Result.Success)
+                        {
+
+                            var imageTex = ((DownloadHandlerTexture)www.downloadHandler).texture;
+                            var _tex = DoReScaleTex(imageTex, 512, 512);
+                            Sprite sprite = CreateSpriteFromTex(imageTex, imageTex.width, imageTex.height);
+                            onSuccess.Invoke(sprite);
+                        }
+                        else
+                        {
+                            if (onError != null)
+                                onError.Invoke(www.error);
+                        }
+                    }
+                }
+                else
+                {
+                    if (onError != null)
+                        onError.Invoke(wwwAccessToken.error);
+                }
             }
         }
 
-        void GetUserNameCallBack(IGraphResult result)
+        public void GetProfilePicFB(string facebookID, Action<Sprite> onSuccess, Action<string> onError, int width = 512, int height = 512)
         {
-            if (result.Error != null)
+            if (FB.IsLoggedIn)
             {
-                Debug.Log("Error during username");
-                return;
+                FB.API(GetPictureURL(facebookID), HttpMethod.GET, (result) =>
+                {
+                    if (result.Error != null)
+                    {
+                        if (onError != null)
+                            onError.Invoke(result.Error);
+                    }
+                    else
+                    {
+                        //byte[] _bytes = result.Texture.EncodeToPNG();
+                        //System.IO.File.WriteAllBytes(Application.persistentDataPath+"/"+facebookID+"_12.png", _bytes);
+                        if (onSuccess != null)
+                        {
+                            var _tex = DoReScaleTex(result.Texture, width, height);
+                            Sprite sprite = CreateSpriteFromTex(result.Texture, result.Texture.width, result.Texture.height);
+                            onSuccess.Invoke(sprite);
+                        }
+                    }
+                });
             }
             else
             {
-                IDictionary<string, object> profile = result.ResultDictionary;
-                m_UserNameText.text = "Hello " + profile["first_name"];
+                GetPublicProfilePicFB(facebookID, onSuccess, onError);
             }
         }
 
+        public void GetPublicDetailsFB(string facebookID, Action<IDictionary<string, object>> onSuccess, Action<string> onError)
+        {
+            FB.API(GetPublicDetailsURL(facebookID), HttpMethod.GET, (result) =>
+            {
+                if (result.Error != null)
+                {
+                    if (onError != null)
+                        onError.Invoke(result.Error);
+                }
+                else
+                {
+                    if (onSuccess != null)
+                        onSuccess.Invoke(result.ResultDictionary);
+                }
+            });
+
+        }
         #endregion
 
 
         #region Sharing
-        public void FacebookShareLink()
+        public void FacebookShareLink(string shareLinkUri, string shareLinkTitle, string shareLinkDesc, string shareLinkLogo)
         {
-            FB.ShareLink(new System.Uri(ConstantIds.fb_sharelink),
-                ConstantIds.fb_sharelink_title,
-                ConstantIds.fb_sharelink_desc,
-                new System.Uri(ConstantIds.fb_sharelink_logo));
+            if (string.IsNullOrEmpty(shareLinkUri))
+            {
+                Debug.Log("shareLinkUri cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(shareLinkTitle))
+            {
+                Debug.Log("shareLinkTitle cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(shareLinkDesc))
+            {
+                Debug.Log("shareLinkDesc cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(shareLinkLogo))
+            {
+                Debug.Log("shareLinkLogo cant be empty");
+                return;
+            }
+
+            FB.ShareLink(new System.Uri(shareLinkUri),
+                shareLinkTitle,
+                shareLinkDesc,
+                new System.Uri(shareLinkLogo));
         }
 
-        public void FacebookFeedShare()
+        public void FacebookFeedShare(string feedShareLink, string feedShareLinkTitle, string feedShareLinkCaption, string feedShareLinkDesc, string feedShareLinkPic, Action<string> onError)
         {
+            if (string.IsNullOrEmpty(feedShareLink))
+            {
+                Debug.Log("feedShareLink cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(feedShareLinkTitle))
+            {
+                Debug.Log("feedShareLinkTitle cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(feedShareLinkCaption))
+            {
+                Debug.Log("feedShareLinkCaption cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(feedShareLinkDesc))
+            {
+                Debug.Log("feedShareLinkDesc cant be empty");
+                return;
+            }
+            if (string.IsNullOrEmpty(feedShareLinkPic))
+            {
+                Debug.Log("feedShareLinkPic cant be empty");
+                return;
+            }
+
             FB.FeedShare(
                 string.Empty, //toId
-                new System.Uri(ConstantIds.fb_feedsharelink), //link
-                ConstantIds.fb_feedsharelink_title, //linkName
-                ConstantIds.fb_feedsharelink_caption, //linkCaption
-                ConstantIds.fb_feedsharelink_desc, //linkDescription
-                new System.Uri(ConstantIds.fb_feedsharelink_picture), //picture
+                new System.Uri(feedShareLink), //link
+                feedShareLinkTitle, //linkName
+                feedShareLinkCaption, //linkCaption
+                feedShareLinkDesc, //linkDescription
+                new System.Uri(feedShareLinkPic), //picture
                 string.Empty, //mediaSource
-                LogCallback //callback
+                (result) =>
+                    {
+                        if (result.Error != null)
+                        {
+                            if (onError != null)
+                                onError.Invoke(result.Error);
+                        }
+                    } //callback
                 );
-        }
-
-        void LogCallback(IResult result)
-        {
-            if (result.Error != null)
-            {
-                Debug.Log("Share didn't work");
-
-            }
-            else
-            {
-                Debug.Log("Share worked");
-            }
-
         }
 
         #endregion
 
         #region Inviting
-        public void FacebookAppRequest()
+        public void FacebookAppRequest(string appRequestMsg, string appRequestTitle)
         {
-            FB.AppRequest(message: ConstantIds.fb_apprequest_msg, title: ConstantIds.fb_apprequest_title);
+            FB.AppRequest(message: appRequestMsg, title: appRequestTitle);
         }
         #endregion
 
         #region Friends
-        public void GetFacebookFriends()
+        public void GetFacebookFriends(Action<List<object>> onSuccess, Action<string> onError)
         {
             //get friends list
-            FB.API("me/friends", HttpMethod.GET, GetFriendsListCallBack);
+            FB.API("me/friends", HttpMethod.GET, (result) =>
+            {
+                if (result.Error != null)
+                {
+                    if (onError != null)
+                        onError.Invoke(result.Error);
+                }
+                else
+                {
+                    IDictionary<string, object> data = result.ResultDictionary;
+                    List<object> scores = (List<object>)data["data"];
+
+                    if (onSuccess != null)
+                        onSuccess.Invoke(scores);
+                }
+            });
 
             //FB.API("/me/invitable_friends?limit=" + _Limit, HttpMethod.GET, GetFriendsListCallBack);
         }
 
 
-        void GetFriendsListCallBack(IGraphResult result)
-        {
-            if (result.Error != null)
-            {
-                m_ListPanel.SetActive(false);
-                Debug.Log("Error during friends list");
-                return;
-            }
-            else
-            {
-                m_ListPanel.SetActive(true);
-                IDictionary<string, object> data = result.ResultDictionary;
-                List<object> friends = (List<object>)data["data"];
-                foreach (object obj in friends)
-                {
-                    Dictionary<string, object> dictio = (Dictionary<string, object>)obj;
-                    InstantiateFriendItem(dictio["name"].ToString(), dictio["id"].ToString());
-                }
-            }
-        }
-
-        void InstantiateFriendItem(string userName, string userId)
-        {
-            GameObject FriendRowItem = Instantiate(m_FriendListItem) as GameObject;
-            FriendRowItem.transform.SetParent(m_ListItemParent, false);
-
-            FriendRowItem.transform.Find("FriendName").GetComponent<Text>().text = userName;
-
-            FB.API(GetPictureURL(userId, 100, 100), HttpMethod.GET, delegate (IGraphResult result)
-            {
-                if (result.Error != null)
-                {
-                    Debug.Log("Error during profile picture for user -" + userName);
-                    return;
-                }
-                else
-                {
-                    FriendRowItem.transform.Find("FriendAvatar").GetComponent<Image>().sprite = CreateSprite(result.Texture);
-                }
-            });
-        }
 
         #endregion
 
         #region Scores
-        public void SetFacebookScore()
+        public void SetFacebookScore(string currentScore, Action onSuccess, Action<string> onError)
         {
-            var scoreData = new Dictionary<string, string>() { { "score", Random.Range(10, 200).ToString() } };
+            var scoreData = new Dictionary<string, string>() { { "score", currentScore } };
 
-            FB.API("/me/scores", HttpMethod.POST, delegate (IGraphResult result)
-            {
-                Debug.Log("Score submit result: " + result.RawResult);
-            }, scoreData);
-        }
-
-        public void GetFacebookScores()
-        {
-            FB.API("/app/scores?fields=score,user.limit(30)", HttpMethod.GET, GetScoresCallback);
-        }
-
-        private void GetScoresCallback(IResult result)
-        {
-            if (result.Error != null)
-            {
-                m_ListPanel.SetActive(false);
-                Debug.Log("Error during scores list");
-                return;
-            }
-            else
-            {
-                m_ListPanel.SetActive(true);
-                IDictionary<string, object> data = result.ResultDictionary;
-                List<object> scores = (List<object>)data["data"];
-                int srNo = 1;
-                foreach (object obj in scores)
-                {
-                    Dictionary<string, object> dictio = (Dictionary<string, object>)obj;
-                    InstantiateScoreItem(srNo.ToString(), dictio["name"].ToString(), dictio["id"].ToString(), dictio["score"].ToString());
-                    srNo++;
-                }
-            }
-        }
-
-        void InstantiateScoreItem(string srNo, string userName, string userId, string userScore)
-        {
-            GameObject ScoreRowItem = Instantiate(m_ScoreListItem) as GameObject;
-            ScoreRowItem.transform.SetParent(m_ListItemParent, false);
-
-            ScoreRowItem.transform.Find("Srno").GetComponent<Text>().text = srNo;
-            ScoreRowItem.transform.Find("FriendName").GetComponent<Text>().text = userName;
-            ScoreRowItem.transform.Find("FriendScore").GetComponent<Text>().text = userScore;
-
-            ScoreRowItem.transform.Find("FriendAvatar").GetComponent<Image>();
-
-            FB.API(GetPictureURL(userId, 100, 100), HttpMethod.GET, delegate (IGraphResult result)
+            FB.API("/me/scores", HttpMethod.POST, (result) =>
             {
                 if (result.Error != null)
                 {
-                    Debug.Log("Error during profile picture for user -" + userName);
-                    return;
+                    if (onError != null)
+                        onError.Invoke(result.Error);
                 }
                 else
                 {
-                    ScoreRowItem.transform.Find("FriendAvatar").GetComponent<Image>().sprite = CreateSprite(result.Texture);
+                    if (onSuccess != null)
+                        onSuccess.Invoke();
+                }
+            }, scoreData);
+        }
+
+        public void GetFacebookScores(Action<List<object>> onSuccess, Action<string> onError)
+        {
+            FB.API("/app/scores?fields=score,user.limit(30)", HttpMethod.GET, (result) =>
+            {
+                if (result.Error != null)
+                {
+                    if (onError != null)
+                        onError.Invoke(result.Error);
+                }
+                else
+                {
+                    IDictionary<string, object> data = result.ResultDictionary;
+                    List<object> scores = (List<object>)data["data"];
+
+                    if (onSuccess != null)
+                        onSuccess.Invoke(scores);
                 }
             });
         }
 
+
+
         #endregion
 
         #region Helper Functions
-        public Sprite CreateSprite(Texture2D spriteTexture, float width = 128f, float height = 128f)
+        public Sprite CreateSpriteFromTex(Texture2D spriteTexture, float width = 128f, float height = 128f)
         {
-            return Sprite.Create(spriteTexture, new Rect(0, 0, width, height), new Vector2(0.5f, 0.5f));
+            return Sprite.Create(spriteTexture, new Rect(0, 0, width, height), Vector2.zero);
         }
 
-        public string GetPictureURL(string facebookID, int? width = null, int? height = null, string type = null)
+        public Texture2D DoReScaleTex(Texture2D tex, int width, int height)
+        {
+            Texture2D scaled = new Texture2D(width, height, TextureFormat.BGRA32, true);
+            Graphics.ConvertTexture(tex, scaled);
+            return scaled;
+        }
+
+        private string GetPublicDetailsURL(string facebookID)
+        {
+            string url = string.Format("/{0}", facebookID);
+            string query = "?fields=id,name,first_name,email";
+            if (!string.IsNullOrEmpty(query)) url += (query);
+            return url;
+        }
+
+        private string GetPictureURL(string facebookID, int? width = null, int? height = null, string type = "large")
         {
             string url = string.Format("/{0}/picture", facebookID);
             string query = width != null ? "&width=" + width.ToString() : "";
             query += height != null ? "&height=" + height.ToString() : "";
             query += type != null ? "&type=" + type : "";
-            if (query != "") url += ("?g" + query);
+            if (!string.IsNullOrEmpty(query)) url += ("?g" + query);
             return url;
         }
 
         public Dictionary<string, string> RandomFriend(List<object> friends)
         {
-            var fd = ((Dictionary<string, object>)(friends[Random.Range(0, friends.Count - 1)]));
+            var fd = ((Dictionary<string, object>)(friends[UnityEngine.Random.Range(0, friends.Count - 1)]));
             var friend = new Dictionary<string, string>();
             friend["id"] = (string)fd["id"];
             friend["first_name"] = (string)fd["first_name"];

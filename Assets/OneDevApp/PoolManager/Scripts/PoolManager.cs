@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace OneDevApp
@@ -82,14 +83,35 @@ namespace OneDevApp
         }
 
         /// <summary>
+        /// Get the selected pool object from an existing pool and enables it.
+        /// </summary>
+        /// <param name="key">The pool key.</param>
+        /// <returns></returns>
+        public GameObject GetNewFromPool(string key)
+        {
+            return EnableObjectFromPool(GetObjectFromPool(key));
+        }
+
+        /// <summary>
+        /// Get the selected pool object from an existing pool.
+        /// </summary>
+        /// <param name="key">The pool key.</param>
+        /// <returns></returns>
+        public PoolObjects GetObjectFromPool(string key)
+        {
+            PoolObjectItem item = itemsToPool.Where(x => x.itemName == key).FirstOrDefault();
+            return GetObjectFromPool(item);
+        }
+
+        /// <summary>
         /// Get the selected pool object from an existing pool.
         /// </summary>
         /// <param name="poolObject">The pool object.</param>
         /// <returns></returns>
-        public PoolObjects GetObjectFromPool(PoolObjects poolObject)
+        public PoolObjects GetObjectFromPool(PoolObjectItem item)
         {
             //Get the pool key for this object.
-            int poolKey = poolObject.GetInstanceID();
+            int poolKey = item.objectToPool.GetInstanceID();
 
             if (poolDictionary.ContainsKey(poolKey))
             {
@@ -106,7 +128,7 @@ namespace OneDevApp
                 }
 
                 //Now, spawn a new one, if we don't find anyone
-                InstantiateNewPoolObject(poolObject, poolObjectsList);
+                InstantiateNewPoolObject(item.objectToPool, poolObjectsList);
 
                 //return the last object added to the list
                 return poolObjectsList[poolObjectsList.Count - 1];

@@ -1,4 +1,4 @@
-﻿// <copyright file="NativeClient.cs" company="Google Inc.">
+// <copyright file="NativeClient.cs" company="Google Inc.">
 // Copyright (C) 2014 Google Inc.  All Rights Reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +20,6 @@
 namespace GooglePlayGames.Android
 {
     using GooglePlayGames.BasicApi;
-    using GooglePlayGames.BasicApi.Multiplayer;
     using GooglePlayGames.BasicApi.SavedGame;
     using GooglePlayGames.OurUtils;
     using System;
@@ -42,28 +41,28 @@ namespace GooglePlayGames.Android
         private readonly object AuthStateLock = new object();
 
         private readonly PlayGamesClientConfiguration mConfiguration;
-        private volatile AndroidTurnBasedMultiplayerClient mTurnBasedClient;
-        private volatile IRealTimeMultiplayerClient mRealTimeClient;
         private volatile ISavedGameClient mSavedGameClient;
         private volatile IEventsClient mEventsClient;
         private volatile IVideoClient mVideoClient;
         private volatile AndroidTokenClient mTokenClient;
-        private volatile Action<Invitation, bool> mInvitationDelegate;
         private volatile Player mUser = null;
         private volatile AuthState mAuthState = AuthState.Unauthenticated;
+        private IUserProfile[] mFriends = new IUserProfile[0];
+        private LoadFriendsStatus mLastLoadFriendsStatus = LoadFriendsStatus.Unknown;
 
         AndroidJavaClass mGamesClass = new AndroidJavaClass("com.google.android.gms.games.Games");
         private static string TasksClassName = "com.google.android.gms.tasks.Tasks";
 
-        private AndroidJavaObject mInvitationCallback = null;
+        private AndroidJavaObject mFriendsResolutionException = null;
 
         private readonly int mLeaderboardMaxResults = 25; // can be from 1 to 25
+
+        private readonly int mFriendsMaxResults = 200; // the maximum load friends page size
 
         internal AndroidClient(PlayGamesClientConfiguration configuration)
         {
             PlayGamesHelperObject.CreateObject();
             this.mConfiguration = Misc.CheckNotNull(configuration);
-            RegisterInvitationDelegate(configuration.InvitationDelegate);
         }
 
         ///<summary></summary>
@@ -93,20 +92,6 @@ namespace GooglePlayGames.Android
                 {
                     using (var signInTasks = new AndroidJavaObject("java.util.ArrayList"))
                     {
-                        if (mInvitationDelegate != null)
-                        {
-                            mInvitationCallback = new AndroidJavaObject(
-                                "com.google.games.bridge.InvitationCallbackProxy",
-                                new InvitationCallbackProxy(mInvitationDelegate));
-                            using (var invitationsClient = getInvitationsClient())
-                            using (var taskRegisterCallback =
-                                invitationsClient.Call<AndroidJavaObject>("registerInvitationCallback",
-                                    mInvitationCallback))
-                            {
-                                signInTasks.Call<bool>("add", taskRegisterCallback);
-                            }
-                        }
-
                         AndroidJavaObject taskGetPlayer =
                             getPlayersClient().Call<AndroidJavaObject>("getCurrentPlayer");
                         AndroidJavaObject taskGetActivationHint =
@@ -147,7 +132,7 @@ namespace GooglePlayGames.Android
                                         var account = mTokenClient.GetAccount();
                                         lock (GameServicesLock)
                                         {
-                                            mSavedGameClient = new AndroidSavedGameClient(account);
+                                            mSavedGameClient = new AndroidSavedGameClient(this, account);
                                             mEventsClient = new AndroidEventsClient(account);
                                             bool isCaptureSupported;
                                             using (var resultObject =
@@ -157,66 +142,11 @@ namespace GooglePlayGames.Android
                                             }
 
                                             mVideoClient = new AndroidVideoClient(isCaptureSupported, account);
-                                            mRealTimeClient = new AndroidRealTimeMultiplayerClient(this, account);
-                                            mTurnBasedClient = new AndroidTurnBasedMultiplayerClient(this, account);
-                                            mTurnBasedClient.RegisterMatchDelegate(mConfiguration.MatchDelegate);
                                         }
 
                                         mAuthState = AuthState.Authenticated;
                                         InvokeCallbackOnGameThread(callback, SignInStatus.Success);
                                         GooglePlayGames.OurUtils.Logger.d("Authentication succeeded");
-                                        try
-                                        {
-                                            using (var activationHint =
-                                                taskGetActivationHint.Call<AndroidJavaObject>("getResult"))
-                                            {
-                                                if (mInvitationDelegate != null)
-                                                {
-                                                    try
-                                                    {
-                                                        using (var invitationObject =
-                                                            activationHint.Call<AndroidJavaObject>("getParcelable",
-                                                                "invitation" /* Multiplayer.EXTRA_INVITATION */))
-                                                        {
-                                                            Invitation invitation =
-                                                                AndroidJavaConverter.ToInvitation(invitationObject);
-                                                            mInvitationDelegate(invitation, /* shouldAutoAccept= */
-                                                                true);
-                                                        }
-                                                    }
-                                                    catch (Exception)
-                                                    {
-                                                        // handle null return
-                                                    }
-                                                }
-
-
-                                                if (mTurnBasedClient.MatchDelegate != null)
-                                                {
-                                                    try
-                                                    {
-                                                        using (var matchObject =
-                                                            activationHint.Call<AndroidJavaObject>("getParcelable",
-                                                                "turn_based_match" /* Multiplayer#EXTRA_TURN_BASED_MATCH */)
-                                                        )
-                                                        {
-                                                            TurnBasedMatch turnBasedMatch =
-                                                                AndroidJavaConverter.ToTurnBasedMatch(matchObject);
-                                                            mTurnBasedClient.MatchDelegate(
-                                                                turnBasedMatch, /* shouldAutoLaunch= */ true);
-                                                        }
-                                                    }
-                                                    catch (Exception)
-                                                    {
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        catch (Exception)
-                                        {
-                                            // handle null return
-                                        }
-
                                         LoadAchievements(ignore => { });
                                     }
                                     else
@@ -231,7 +161,7 @@ namespace GooglePlayGames.Android
                                         using (var exception = completeTask.Call<AndroidJavaObject>("getException"))
                                         {
                                             GooglePlayGames.OurUtils.Logger.e(
-                                                "Authentication failed" + exception.Call<string>("toString"));
+                                                "Authentication failed - " + exception.Call<string>("toString"));
                                             InvokeCallbackOnGameThread(callback, SignInStatus.InternalError);
                                         }
                                     }
@@ -261,6 +191,16 @@ namespace GooglePlayGames.Android
             return result => InvokeCallbackOnGameThread(callback, result);
         }
 
+        private static void InvokeCallbackOnGameThread(Action callback)
+        {
+            if (callback == null)
+            {
+                return;
+            }
+
+            PlayGamesHelperObject.RunOnGameThread(() => { callback(); });
+        }
+
         private static void InvokeCallbackOnGameThread<T>(Action<T> callback, T data)
         {
             if (callback == null)
@@ -268,11 +208,7 @@ namespace GooglePlayGames.Android
                 return;
             }
 
-            PlayGamesHelperObject.RunOnGameThread(() =>
-            {
-                GooglePlayGames.OurUtils.Logger.d("Invoking user callback on game thread");
-                callback(data);
-            });
+            PlayGamesHelperObject.RunOnGameThread(() => { callback(data); });
         }
 
 
@@ -297,11 +233,7 @@ namespace GooglePlayGames.Android
                 return;
             }
 
-            PlayGamesHelperObject.RunOnGameThread(() =>
-            {
-                OurUtils.Logger.d("Invoking user callback on game thread");
-                callback(t1, t2);
-            });
+            PlayGamesHelperObject.RunOnGameThread(() => { callback(t1, t2); });
         }
 
         private void InitializeGameServices()
@@ -419,19 +351,201 @@ namespace GooglePlayGames.Android
 
         public void LoadFriends(Action<bool> callback)
         {
-            if (!IsAuthenticated())
-            {
-                GooglePlayGames.OurUtils.Logger.d("Cannot loadFriends when not authenticated");
-                InvokeCallbackOnGameThread(callback, false);
-                return;
-            }
+            LoadAllFriends(mFriendsMaxResults, /* forceReload= */ false, /* loadMore= */ false, callback);
+        }
 
-            InvokeCallbackOnGameThread(callback, true);
+        private void LoadAllFriends(int pageSize, bool forceReload, bool loadMore,
+            Action<bool> callback)
+        {
+            LoadFriendsPaginated(pageSize, loadMore, forceReload, result =>
+            {
+                mLastLoadFriendsStatus = result;
+                switch (result)
+                {
+                    case LoadFriendsStatus.Completed:
+                        InvokeCallbackOnGameThread(callback, true);
+                        break;
+                    case LoadFriendsStatus.LoadMore:
+                        // There are more friends to load.
+                        LoadAllFriends(pageSize, /* forceReload= */ false, /* loadMore= */ true, callback);
+                        break;
+                    case LoadFriendsStatus.ResolutionRequired:
+                    case LoadFriendsStatus.InternalError:
+                    case LoadFriendsStatus.NotAuthorized:
+                        InvokeCallbackOnGameThread(callback, false);
+                        break;
+                    default:
+                        GooglePlayGames.OurUtils.Logger.d("There was an error when loading friends." + result);
+                        InvokeCallbackOnGameThread(callback, false);
+                        break;
+                }
+            });
+        }
+
+        public void LoadFriends(int pageSize, bool forceReload,
+            Action<LoadFriendsStatus> callback)
+        {
+            LoadFriendsPaginated(pageSize, /* isLoadMore= */ false, /* forceReload= */ forceReload,
+                callback);
+        }
+
+        public void LoadMoreFriends(int pageSize, Action<LoadFriendsStatus> callback)
+        {
+            LoadFriendsPaginated(pageSize, /* isLoadMore= */ true, /* forceReload= */ false,
+                callback);
+        }
+
+        private void LoadFriendsPaginated(int pageSize, bool isLoadMore, bool forceReload,
+            Action<LoadFriendsStatus> callback)
+        {
+            mFriendsResolutionException = null;
+            using (var playersClient = getPlayersClient())
+            using (var task = isLoadMore
+                ? playersClient.Call<AndroidJavaObject>("loadMoreFriends", pageSize)
+                : playersClient.Call<AndroidJavaObject>("loadFriends", pageSize,
+                    forceReload))
+            {
+                AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(
+                    task, annotatedData =>
+                    {
+                        using (var playersBuffer = annotatedData.Call<AndroidJavaObject>("get"))
+                        {
+                            AndroidJavaObject metadata = playersBuffer.Call<AndroidJavaObject>("getMetadata");
+                            var areMoreFriendsToLoad = metadata != null &&
+                                                       metadata.Call<AndroidJavaObject>("getString",
+                                                           "next_page_token") != null;
+                            mFriends = AndroidJavaConverter.playersBufferToArray(playersBuffer);
+                            mLastLoadFriendsStatus = areMoreFriendsToLoad
+                                ? LoadFriendsStatus.LoadMore
+                                : LoadFriendsStatus.Completed;
+                            InvokeCallbackOnGameThread(callback, mLastLoadFriendsStatus);
+                        }
+                    });
+                AndroidTaskUtils.AddOnFailureListener(task, exception =>
+                {
+                    AndroidHelperFragment.IsResolutionRequired(exception, resolutionRequired =>
+                    {
+                        if (resolutionRequired)
+                        {
+                            mFriendsResolutionException =
+                                exception.Call<AndroidJavaObject>("getResolution");
+                            mLastLoadFriendsStatus = LoadFriendsStatus.ResolutionRequired;
+                            mFriends = new IUserProfile[0];
+                            InvokeCallbackOnGameThread(callback, LoadFriendsStatus.ResolutionRequired);
+                        }
+                        else
+                        {
+                            mFriendsResolutionException = null;
+                            var statusCode = exception.Call<int>("getStatusCode");
+                            if (statusCode == /* GamesClientStatusCodes.NETWORK_ERROR_NO_DATA */ 26504)
+                            {
+                                mLastLoadFriendsStatus = LoadFriendsStatus.NetworkError;
+                                InvokeCallbackOnGameThread(callback, LoadFriendsStatus.NetworkError);
+                                return;
+                            }
+
+                            mLastLoadFriendsStatus = LoadFriendsStatus.InternalError;
+                            Debug.Log("LoadFriends failed with status code: " + statusCode);
+                            InvokeCallbackOnGameThread(callback, LoadFriendsStatus.InternalError);
+                        }
+                    });
+                    return;
+                });
+            }
+        }
+
+        public LoadFriendsStatus GetLastLoadFriendsStatus()
+        {
+            return mLastLoadFriendsStatus;
+        }
+
+        public void AskForLoadFriendsResolution(Action<UIStatus> callback)
+        {
+            if (mFriendsResolutionException == null)
+            {
+                GooglePlayGames.OurUtils.Logger.d("The developer asked for access to the friends " +
+                                                  "list but there is no intent to trigger the UI. This may be because the user " +
+                                                  "has granted access already or the game has not called loadFriends() before.");
+                using (var playersClient = getPlayersClient())
+                using (
+                    var task = playersClient.Call<AndroidJavaObject>("loadFriends", /* pageSize= */ 1,
+                        /* forceReload= */ false))
+                {
+                    AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(
+                        task, annotatedData => { InvokeCallbackOnGameThread(callback, UIStatus.Valid); });
+                    AndroidTaskUtils.AddOnFailureListener(task, exception =>
+                    {
+                        AndroidHelperFragment.IsResolutionRequired(exception, resolutionRequired =>
+                        {
+                            if (resolutionRequired)
+                            {
+                                mFriendsResolutionException =
+                                    exception.Call<AndroidJavaObject>("getResolution");
+                                AndroidHelperFragment.AskForLoadFriendsResolution(
+                                    mFriendsResolutionException, AsOnGameThreadCallback(callback));
+                            }
+                            else
+                            {
+                                var statusCode = exception.Call<int>("getStatusCode");
+                                if (statusCode == /* GamesClientStatusCodes.NETWORK_ERROR_NO_DATA */ 26504)
+                                {
+                                    InvokeCallbackOnGameThread(callback, UIStatus.NetworkError);
+                                    return;
+                                }
+
+                                Debug.Log("LoadFriends failed with status code: " + statusCode);
+                                InvokeCallbackOnGameThread(callback, UIStatus.InternalError);
+                            }
+                        });
+                        return;
+                    });
+                }
+            }
+            else
+            {
+                AndroidHelperFragment.AskForLoadFriendsResolution(mFriendsResolutionException,
+                    AsOnGameThreadCallback(callback));
+            }
+        }
+
+        public void ShowCompareProfileWithAlternativeNameHintsUI(string playerId,
+            string otherPlayerInGameName,
+            string currentPlayerInGameName,
+            Action<UIStatus> callback)
+        {
+            AndroidHelperFragment.ShowCompareProfileWithAlternativeNameHintsUI(
+                playerId, otherPlayerInGameName, currentPlayerInGameName,
+                GetUiSignOutCallbackOnGameThread(callback));
+        }
+
+        public void GetFriendsListVisibility(bool forceReload,
+            Action<FriendsListVisibilityStatus> callback)
+        {
+            using (var playersClient = getPlayersClient())
+            using (
+                var task = playersClient.Call<AndroidJavaObject>("getCurrentPlayer", forceReload))
+            {
+                AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(task, annotatedData =>
+                {
+                    AndroidJavaObject currentPlayerInfo =
+                        annotatedData.Call<AndroidJavaObject>("get").Call<AndroidJavaObject>(
+                            "getCurrentPlayerInfo");
+                    int playerListVisibility =
+                        currentPlayerInfo.Call<int>("getFriendsListVisibilityStatus");
+                    InvokeCallbackOnGameThread(callback,
+                        AndroidJavaConverter.ToFriendsListVisibilityStatus(playerListVisibility));
+                });
+                AndroidTaskUtils.AddOnFailureListener(task, exception =>
+                {
+                    InvokeCallbackOnGameThread(callback, FriendsListVisibilityStatus.NetworkError);
+                    return;
+                });
+            }
         }
 
         public IUserProfile[] GetFriends()
         {
-            return new IUserProfile[0];
+            return mFriends;
         }
 
         ///<summary></summary>
@@ -446,40 +560,18 @@ namespace GooglePlayGames.Android
         {
             if (mTokenClient == null)
             {
+                InvokeCallbackOnGameThread(uiCallback);
                 return;
             }
 
-            if (mInvitationCallback != null)
+            mTokenClient.Signout();
+            mAuthState = AuthState.Unauthenticated;
+            if (uiCallback != null)
             {
-                using (var invitationsClient = getInvitationsClient())
-                using (var task = invitationsClient.Call<AndroidJavaObject>(
-                    "unregisterInvitationCallback", mInvitationCallback))
-                {
-                    AndroidTaskUtils.AddOnCompleteListener<AndroidJavaObject>(
-                        task,
-                        completedTask =>
-                        {
-                            mInvitationCallback = null;
-                            mTokenClient.Signout();
-                            mAuthState = AuthState.Unauthenticated;
-                            if (uiCallback != null)
-                            {
-                                uiCallback();
-                            }
-                        });
-                }
-            }
-            else
-            {
-                mTokenClient.Signout();
-                mAuthState = AuthState.Unauthenticated;
-                if (uiCallback != null)
-                {
-                    uiCallback();
-                }
+                InvokeCallbackOnGameThread(uiCallback);
             }
 
-            SignInHelper.SetPromptUiSignIn(true);
+            PlayGamesHelperObject.RunOnGameThread(() => SignInHelper.SetPromptUiSignIn(true));
         }
 
         ///<summary></summary>
@@ -571,12 +663,15 @@ namespace GooglePlayGames.Android
                         }
                     });
 
-                AndroidTaskUtils.AddOnFailureListener(
+                AddOnFailureListenerWithSignOut(
                     task,
                     e =>
                     {
-                        Debug.Log("GetPlayerStats failed");
-                        InvokeCallbackOnGameThread(callback, CommonStatusCodes.InternalError, new PlayerStats());
+                        Debug.Log("GetPlayerStats failed: " + e.Call<string>("toString"));
+                        var statusCode = IsAuthenticated()
+                            ? CommonStatusCodes.InternalError
+                            : CommonStatusCodes.SignInRequired;
+                        InvokeCallbackOnGameThread(callback, statusCode, new PlayerStats());
                     });
             }
         }
@@ -628,20 +723,19 @@ namespace GooglePlayGames.Android
                                 }
                             });
 
-                        AndroidTaskUtils.AddOnFailureListener(
-                            task,
-                            exception =>
+                        AddOnFailureListenerWithSignOut(task, exception =>
+                        {
+                            Debug.Log("LoadUsers failed for index " + i +
+                                      " with: " + exception.Call<string>("toString"));
+                            lock (countLock)
                             {
-                                Debug.Log("LoadUsers failed for index " + i);
-                                lock (countLock)
+                                ++resultCount;
+                                if (resultCount == count)
                                 {
-                                    ++resultCount;
-                                    if (resultCount == count)
-                                    {
-                                        InvokeCallbackOnGameThread(callback, users);
-                                    }
+                                    InvokeCallbackOnGameThread(callback, users);
                                 }
-                            });
+                            }
+                        });
                     }
                 }
             }
@@ -698,11 +792,11 @@ namespace GooglePlayGames.Android
                         }
                     });
 
-                AndroidTaskUtils.AddOnFailureListener(
+                AddOnFailureListenerWithSignOut(
                     task,
                     exception =>
                     {
-                        Debug.Log("LoadAchievements failed");
+                        Debug.Log("LoadAchievements failed: " + exception.Call<string>("toString"));
                         InvokeCallbackOnGameThread(callback, new Achievement[0]);
                     });
             }
@@ -817,6 +911,23 @@ namespace GooglePlayGames.Android
             }
         }
 
+        private void AddOnFailureListenerWithSignOut(AndroidJavaObject task, Action<AndroidJavaObject> callback)
+        {
+            AndroidTaskUtils.AddOnFailureListener(
+                task,
+                exception =>
+                {
+                    var statusCode = exception.Call<int>("getStatusCode");
+                    if (statusCode == /* CommonStatusCodes.SignInRequired */ 4 ||
+                        statusCode == /* GamesClientStatusCodes.CLIENT_RECONNECT_REQUIRED */ 26502)
+                    {
+                        SignOut();
+                    }
+
+                    callback(exception);
+                });
+        }
+
         private Action<UIStatus> GetUiSignOutCallbackOnGameThread(Action<UIStatus> callback)
         {
             Action<UIStatus> uiCallback = (status) =>
@@ -879,14 +990,29 @@ namespace GooglePlayGames.Android
                             }
                         });
 
-                    AndroidTaskUtils.AddOnFailureListener(
-                        task,
-                        exception =>
-                        {
-                            Debug.Log("LoadScores failed");
-                            InvokeCallbackOnGameThread(callback,
-                                new LeaderboardScoreData(leaderboardId, ResponseStatus.InternalError));
-                        });
+                    AddOnFailureListenerWithSignOut(task, exception =>
+                    {
+                        AndroidHelperFragment.IsResolutionRequired(
+                            exception, resolutionRequired =>
+                            {
+                                if (resolutionRequired)
+                                {
+                                    mFriendsResolutionException = exception.Call<AndroidJavaObject>(
+                                        "getResolution");
+                                    InvokeCallbackOnGameThread(
+                                        callback, new LeaderboardScoreData(leaderboardId,
+                                            ResponseStatus.ResolutionRequired));
+                                }
+                                else
+                                {
+                                    mFriendsResolutionException = null;
+                                }
+                            });
+                        Debug.Log("LoadScores failed: " + exception.Call<string>("toString"));
+                        InvokeCallbackOnGameThread(
+                            callback, new LeaderboardScoreData(leaderboardId,
+                                ResponseStatus.InternalError));
+                    });
                 }
             }
         }
@@ -918,14 +1044,28 @@ namespace GooglePlayGames.Android
                         }
                     });
 
-                AndroidTaskUtils.AddOnFailureListener(
-                    task,
-                    exception =>
+                AddOnFailureListenerWithSignOut(task, exception =>
+                {
+                    AndroidHelperFragment.IsResolutionRequired(exception, resolutionRequired =>
                     {
-                        Debug.Log("LoadMoreScores failed");
-                        InvokeCallbackOnGameThread(callback,
-                            new LeaderboardScoreData(token.LeaderboardId, ResponseStatus.InternalError));
+                        if (resolutionRequired)
+                        {
+                            mFriendsResolutionException =
+                                exception.Call<AndroidJavaObject>("getResolution");
+                            InvokeCallbackOnGameThread(
+                                callback, new LeaderboardScoreData(token.LeaderboardId,
+                                    ResponseStatus.ResolutionRequired));
+                        }
+                        else
+                        {
+                            mFriendsResolutionException = null;
+                        }
                     });
+                    Debug.Log("LoadMoreScores failed: " + exception.Call<string>("toString"));
+                    InvokeCallbackOnGameThread(
+                        callback, new LeaderboardScoreData(token.LeaderboardId,
+                            ResponseStatus.InternalError));
+                });
             }
         }
 
@@ -1035,12 +1175,9 @@ namespace GooglePlayGames.Android
             lock (GameServicesLock)
             {
                 var account = mTokenClient.GetAccount();
-                mSavedGameClient = new AndroidSavedGameClient(account);
+                mSavedGameClient = new AndroidSavedGameClient(this, account);
                 mEventsClient = new AndroidEventsClient(account);
                 mVideoClient = new AndroidVideoClient(mVideoClient.IsCaptureSupported(), account);
-                mRealTimeClient = new AndroidRealTimeMultiplayerClient(this, account);
-                mTurnBasedClient = new AndroidTurnBasedMultiplayerClient(this, account);
-                mTurnBasedClient.RegisterMatchDelegate(mConfiguration.MatchDelegate);
             }
         }
 
@@ -1049,31 +1186,6 @@ namespace GooglePlayGames.Android
         public bool HasPermissions(string[] scopes)
         {
             return mTokenClient.HasPermissions(scopes);
-        }
-
-        ///<summary></summary>
-        /// <seealso cref="GooglePlayGames.BasicApi.IPlayGamesClient.GetRtmpClient"/>
-        public IRealTimeMultiplayerClient GetRtmpClient()
-        {
-            if (!IsAuthenticated())
-            {
-                return null;
-            }
-
-            lock (GameServicesLock)
-            {
-                return mRealTimeClient;
-            }
-        }
-
-        ///<summary></summary>
-        /// <seealso cref="GooglePlayGames.BasicApi.IPlayGamesClient.GetTbmpClient"/>
-        public ITurnBasedMultiplayerClient GetTbmpClient()
-        {
-            lock (GameServicesLock)
-            {
-                return mTurnBasedClient;
-            }
         }
 
         ///<summary></summary>
@@ -1106,42 +1218,6 @@ namespace GooglePlayGames.Android
             }
         }
 
-        ///<summary></summary>
-        /// <seealso cref="GooglePlayGames.BasicApi.IPlayGamesClient.RegisterInvitationDelegate"/>
-        public void RegisterInvitationDelegate(InvitationReceivedDelegate invitationDelegate)
-        {
-            if (invitationDelegate == null)
-            {
-                mInvitationDelegate = null;
-            }
-            else
-            {
-                mInvitationDelegate = AsOnGameThreadCallback<Invitation, bool>(
-                    (invitation, autoAccept) => invitationDelegate(invitation, autoAccept));
-            }
-        }
-
-        private class InvitationCallbackProxy : AndroidJavaProxy
-        {
-            private Action<Invitation, bool> mInvitationDelegate;
-
-            public InvitationCallbackProxy(Action<Invitation, bool> invitationDelegate)
-                : base("com/google/games/bridge/InvitationCallbackProxy$Callback")
-            {
-                mInvitationDelegate = invitationDelegate;
-            }
-
-            public void onInvitationReceived(AndroidJavaObject invitation)
-            {
-                mInvitationDelegate.Invoke(AndroidJavaConverter.ToInvitation(invitation), /* shouldAutoAccept= */
-                    false);
-            }
-
-            public void onInvitationRemoved(string invitationId)
-            {
-            }
-        }
-
         private AndroidJavaObject getAchievementsClient()
         {
             return mGamesClass.CallStatic<AndroidJavaObject>("getAchievementsClient",
@@ -1152,12 +1228,6 @@ namespace GooglePlayGames.Android
         {
             return mGamesClass.CallStatic<AndroidJavaObject>("getGamesClient", AndroidHelperFragment.GetActivity(),
                 mTokenClient.GetAccount());
-        }
-
-        private AndroidJavaObject getInvitationsClient()
-        {
-            return mGamesClass.CallStatic<AndroidJavaObject>("getInvitationsClient",
-                AndroidHelperFragment.GetActivity(), mTokenClient.GetAccount());
         }
 
         private AndroidJavaObject getPlayersClient()

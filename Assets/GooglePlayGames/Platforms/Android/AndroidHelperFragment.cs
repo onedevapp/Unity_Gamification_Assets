@@ -1,4 +1,4 @@
-﻿// <copyright file="AndroidTokenClient.cs" company="Google Inc.">
+// <copyright file="AndroidTokenClient.cs" company="Google Inc.">
 // Copyright (C) 2015 Google Inc.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +18,6 @@
 namespace GooglePlayGames.Android
 {
     using GooglePlayGames.BasicApi;
-    using GooglePlayGames.BasicApi.Multiplayer;
     using GooglePlayGames.BasicApi.SavedGame;
     using OurUtils;
     using UnityEngine;
@@ -56,7 +55,7 @@ namespace GooglePlayGames.Android
                     task,
                     uiCode =>
                     {
-                        Debug.Log("ShowAchievementsUI result " + uiCode);
+                        OurUtils.Logger.d("ShowAchievementsUI result " + uiCode);
                         cb.Invoke((UIStatus) uiCode);
                     });
 
@@ -64,7 +63,7 @@ namespace GooglePlayGames.Android
                     task,
                     exception =>
                     {
-                        Debug.Log("ShowAchievementsUI failed with exception");
+                        OurUtils.Logger.e("ShowAchievementsUI failed with exception");
                         cb.Invoke(UIStatus.InternalError);
                     });
             }
@@ -89,7 +88,7 @@ namespace GooglePlayGames.Android
                     task,
                     uiCode =>
                     {
-                        Debug.Log("ShowAllLeaderboardsUI result " + uiCode);
+                        OurUtils.Logger.d("ShowAllLeaderboardsUI result " + uiCode);
                         cb.Invoke((UIStatus) uiCode);
                     });
 
@@ -97,7 +96,7 @@ namespace GooglePlayGames.Android
                     task,
                     exception =>
                     {
-                        Debug.Log("ShowAllLeaderboardsUI failed with exception");
+                        OurUtils.Logger.e("ShowAllLeaderboardsUI failed with exception");
                         cb.Invoke(UIStatus.InternalError);
                     });
             }
@@ -114,7 +113,7 @@ namespace GooglePlayGames.Android
                     task,
                     uiCode =>
                     {
-                        Debug.Log("ShowLeaderboardUI result " + uiCode);
+                        OurUtils.Logger.d("ShowLeaderboardUI result " + uiCode);
                         cb.Invoke((UIStatus) uiCode);
                     });
 
@@ -122,9 +121,67 @@ namespace GooglePlayGames.Android
                     task,
                     exception =>
                     {
-                        Debug.Log("ShowLeaderboardUI failed with exception");
+                        OurUtils.Logger.e("ShowLeaderboardUI failed with exception");
                         cb.Invoke(UIStatus.InternalError);
                     });
+            }
+        }
+
+        public static void ShowCompareProfileWithAlternativeNameHintsUI(
+            string playerId, string otherPlayerInGameName, string currentPlayerInGameName,
+            Action<UIStatus> cb)
+        {
+            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
+            using (
+                var task = helperFragment.CallStatic<AndroidJavaObject>(
+                    "showCompareProfileWithAlternativeNameHintsUI",
+                    AndroidHelperFragment.GetActivity(), playerId, otherPlayerInGameName,
+                    currentPlayerInGameName))
+            {
+                AndroidTaskUtils.AddOnSuccessListener<int>(task, uiCode =>
+                {
+                    OurUtils.Logger.d("ShowCompareProfileWithAlternativeNameHintsUI result " + uiCode);
+                    cb.Invoke((UIStatus) uiCode);
+                });
+                AndroidTaskUtils.AddOnFailureListener(task, exception =>
+                {
+                    OurUtils.Logger.e("ShowCompareProfileWithAlternativeNameHintsUI failed with exception");
+                    cb.Invoke(UIStatus.InternalError);
+                });
+            }
+        }
+
+        public static void IsResolutionRequired(
+            AndroidJavaObject friendsSharingConsentException, Action<bool> cb)
+        {
+            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
+            {
+                var isResolutionRequired = helperFragment.CallStatic<bool>(
+                    "isResolutionRequired", friendsSharingConsentException);
+                cb.Invoke(isResolutionRequired);
+            }
+        }
+
+        public static void AskForLoadFriendsResolution(
+            AndroidJavaObject friendsSharingConsentException, Action<UIStatus> cb)
+        {
+            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
+            using (
+                var task = helperFragment.CallStatic<AndroidJavaObject>(
+                    "askForLoadFriendsResolution", AndroidHelperFragment.GetActivity(),
+                    friendsSharingConsentException))
+            {
+                AndroidTaskUtils.AddOnSuccessListener<int>(task, uiCode =>
+                {
+                    OurUtils.Logger.d("AskForLoadFriendsResolution result " + uiCode);
+                    cb.Invoke((UIStatus) uiCode);
+                });
+
+                AndroidTaskUtils.AddOnFailureListener(task, exception =>
+                {
+                    OurUtils.Logger.e("AskForLoadFriendsResolution failed with exception");
+                    cb.Invoke(UIStatus.InternalError);
+                });
             }
         }
 
@@ -141,7 +198,7 @@ namespace GooglePlayGames.Android
                     result =>
                     {
                         SelectUIStatus status = (SelectUIStatus) result.Get<int>("status");
-                        Debug.Log("ShowSelectSnapshotUI result " + status);
+                        OurUtils.Logger.d("ShowSelectSnapshotUI result " + status);
 
                         AndroidJavaObject javaMetadata = result.Get<AndroidJavaObject>("metadata");
                         AndroidSnapshotMetadata metadata =
@@ -156,193 +213,9 @@ namespace GooglePlayGames.Android
                     task,
                     exception =>
                     {
-                        Debug.Log("ShowSelectSnapshotUI failed with exception");
+                        OurUtils.Logger.e("ShowSelectSnapshotUI failed with exception");
                         cb.Invoke(SelectUIStatus.InternalError, null);
                     });
-            }
-        }
-
-        public static void ShowRtmpSelectOpponentsUI(uint minOpponents, uint maxOpponents,
-            Action<UIStatus, InvitationResultHolder> cb)
-        {
-            ShowSelectOpponentsUI(minOpponents, maxOpponents, /* isRealTime= */ true, cb);
-        }
-
-        public static void ShowTbmpSelectOpponentsUI(uint minOpponents, uint maxOpponents,
-            Action<UIStatus, InvitationResultHolder> cb)
-        {
-            ShowSelectOpponentsUI(minOpponents, maxOpponents, /* isRealTime= */ false, cb);
-        }
-
-        private static void ShowSelectOpponentsUI(uint minOpponents, uint maxOpponents, bool isRealTime,
-            Action<UIStatus, InvitationResultHolder> cb)
-        {
-            string methodName = isRealTime ? "showRtmpSelectOpponentsUi" : "showTbmpSelectOpponentsUi";
-            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
-            using (var task = helperFragment.CallStatic<AndroidJavaObject>(methodName,
-                AndroidHelperFragment.GetActivity(), (int) minOpponents, (int) maxOpponents))
-            {
-                AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(
-                    task,
-                    result =>
-                    {
-                        int status = result.Get<int>("status");
-                        if ((UIStatus) status != UIStatus.Valid)
-                        {
-                            cb.Invoke((UIStatus) status, null);
-                            return;
-                        }
-
-                        List<string> playerIdsToInvite;
-                        using (var ids = result.Get<AndroidJavaObject>("playerIdsToInvite"))
-                        {
-                            playerIdsToInvite = CreatePlayerIdsToInvite(ids);
-                        }
-
-                        InvitationResultHolder resultHolder = new InvitationResultHolder(
-                            result.Get<int>("minAutomatchingPlayers"),
-                            result.Get<int>("maxAutomatchingPlayers"),
-                            playerIdsToInvite
-                        );
-
-                        cb.Invoke((UIStatus) status, resultHolder);
-                    });
-
-                AndroidTaskUtils.AddOnFailureListener(
-                    task,
-                    exception =>
-                    {
-                        Debug.Log("showSelectOpponentsUi failed with exception");
-                        cb.Invoke(UIStatus.InternalError, null);
-                    });
-            }
-        }
-
-        public enum WaitingRoomUIStatus
-        {
-            Valid = 1,
-            Cancelled = 2,
-            LeftRoom = 3,
-            InvalidRoom = 4,
-            Busy = -1,
-            InternalError = -2,
-        }
-
-        public static void ShowWaitingRoomUI(AndroidJavaObject room, int minParticipantsToStart,
-            Action<WaitingRoomUIStatus, AndroidJavaObject> cb)
-        {
-            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
-            using (var task = helperFragment.CallStatic<AndroidJavaObject>("showWaitingRoomUI",
-                AndroidHelperFragment.GetActivity(), room, minParticipantsToStart))
-            {
-                AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(
-                    task,
-                    result =>
-                    {
-                        cb.Invoke((WaitingRoomUIStatus) result.Get<int>("status"),
-                            result.Get<AndroidJavaObject>("room"));
-                    });
-
-                AndroidTaskUtils.AddOnFailureListener(
-                    task,
-                    exception =>
-                    {
-                        Debug.Log("ShowWaitingRoomUI failed with exception");
-                        cb.Invoke(WaitingRoomUIStatus.InternalError, null);
-                    });
-            }
-        }
-
-        public static void ShowInboxUI(Action<UIStatus, TurnBasedMatch> cb)
-        {
-            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
-            using (var task = helperFragment.CallStatic<AndroidJavaObject>("showInboxUi",
-                AndroidHelperFragment.GetActivity()))
-            {
-                AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(
-                    task,
-                    result =>
-                    {
-                        int status = result.Get<int>("status");
-                        if ((UIStatus) status != UIStatus.Valid)
-                        {
-                            cb.Invoke((UIStatus) status, null);
-                            return;
-                        }
-
-                        using (var turnBasedMatch = result.Get<AndroidJavaObject>("turnBasedMatch"))
-                        {
-                            cb.Invoke((UIStatus) status, AndroidJavaConverter.ToTurnBasedMatch(turnBasedMatch));
-                        }
-                    });
-
-                AndroidTaskUtils.AddOnFailureListener(
-                    task,
-                    exception =>
-                    {
-                        Debug.Log("showInboxUi failed with exception");
-                        cb.Invoke(UIStatus.InternalError, null);
-                    });
-            }
-        }
-
-        public static void ShowInvitationInboxUI(Action<UIStatus, Invitation> cb)
-        {
-            using (var helperFragment = new AndroidJavaClass(HelperFragmentClass))
-            using (var task = helperFragment.CallStatic<AndroidJavaObject>("showInvitationInboxUI",
-                AndroidHelperFragment.GetActivity()))
-            {
-                AndroidTaskUtils.AddOnSuccessListener<AndroidJavaObject>(
-                    task,
-                    result =>
-                    {
-                        int status = result.Get<int>("status");
-                        if ((UIStatus) status != UIStatus.Valid)
-                        {
-                            cb.Invoke((UIStatus) status, null);
-                            return;
-                        }
-
-                        using (var invitation = result.Get<AndroidJavaObject>("invitation"))
-                        {
-                            cb.Invoke((UIStatus) status, AndroidJavaConverter.ToInvitation(invitation));
-                        }
-                    });
-
-                AndroidTaskUtils.AddOnFailureListener(
-                    task,
-                    exception =>
-                    {
-                        Debug.Log("ShowInvitationInboxUI failed with exception");
-                        cb.Invoke(UIStatus.InternalError, null);
-                    });
-            }
-        }
-
-        private static List<string> CreatePlayerIdsToInvite(AndroidJavaObject playerIdsObject)
-        {
-            int size = playerIdsObject.Call<int>("size");
-            List<string> playerIdsToInvite = new List<string>();
-            for (int i = 0; i < size; i++)
-            {
-                playerIdsToInvite.Add(playerIdsObject.Call<string>("get", i));
-            }
-
-            return playerIdsToInvite;
-        }
-
-        public class InvitationResultHolder
-        {
-            public int MinAutomatchingPlayers;
-            public int MaxAutomatchingPlayers;
-            public List<string> PlayerIdsToInvite;
-
-            public InvitationResultHolder(int MinAutomatchingPlayers, int MaxAutomatchingPlayers,
-                List<string> PlayerIdsToInvite)
-            {
-                this.MinAutomatchingPlayers = MinAutomatchingPlayers;
-                this.MaxAutomatchingPlayers = MaxAutomatchingPlayers;
-                this.PlayerIdsToInvite = PlayerIdsToInvite;
             }
         }
     }
