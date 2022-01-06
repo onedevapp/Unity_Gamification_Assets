@@ -1,16 +1,13 @@
 ﻿using Facebook.Unity;
 using SimpleJSON;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Networking;
-using UnityEngine.UI;
 
 namespace OneDevApp
 {
     [Serializable]
-    public struct FacebookDetailsResult
+    public struct FacebookDetailsRequest
     {
         public string accessToken;
         public string profileUserId;
@@ -24,7 +21,8 @@ namespace OneDevApp
         #region Public Variables
         public Action OnFBInit;
 
-        public FacebookDetailsResult facebookDetails;
+        public FacebookDetailsRequest facebookDetails;
+
         public bool isLoggedIn
         {
             get
@@ -77,7 +75,7 @@ namespace OneDevApp
             }
         }
 
-        public void FacebookLogIn(Action<FacebookDetailsResult> success, Action<string> error)
+        public void FacebookLogIn(Action<FacebookDetailsRequest> success, Action<string> error)
         {
             if (FB.IsLoggedIn)
             {
@@ -90,7 +88,10 @@ namespace OneDevApp
                 {
                     if (result.Error == null)
                     {
-                        InitSession(success, error);
+                        if (FB.IsLoggedIn)
+                            InitSession(success, error);
+                        else if (error != null)
+                            error.Invoke("User cancelled");
                     }
                     else
                     {
@@ -101,9 +102,9 @@ namespace OneDevApp
             }
         }
 
-        private void InitSession(Action<FacebookDetailsResult> success, Action<string> error)
+        private void InitSession(Action<FacebookDetailsRequest> success, Action<string> error)
         {
-            facebookDetails = new FacebookDetailsResult();
+            facebookDetails = new FacebookDetailsRequest();
             //get profile picture
             GetProfilePicFB("me", (Sprite pic) => { 
                 facebookDetails.profilePic = pic;
@@ -137,62 +138,41 @@ namespace OneDevApp
             ///Need to upadte to OCT 2020 version, which requires access token to get the profile pic
             //https://graph.facebook.com/oauth/access_token?client_id={your-app-id}&client_secret={your-app-secret}&grant_type=client_credentials
             //https://graph.facebook.com/{profile_id}/picture?type=large&access_token={app_access_token}
-            StartCoroutine(getPublicProfilePicFB(facebookID, onSuccess, onError));
-        }
 
-        private IEnumerator getPublicProfilePicFB(string facebookID, Action<Sprite> onSuccess, Action<string> onError)
-        {
-
-            using (UnityWebRequest wwwAccessToken = UnityWebRequest.Get("https://graph.facebook.com/oauth/access_token?client_id=" + ConstantIds.FB_APP_ID + "&client_secret=" + ConstantIds.FB_APP_SECRET + "&grant_type=client_credentials"))
-            {
-                wwwAccessToken.timeout = 30;
-                //Send request
-                yield return wwwAccessToken.SendWebRequest();
-
-                while (!wwwAccessToken.isDone)
-                    yield return wwwAccessToken;
-
-                while (!wwwAccessToken.downloadHandler.isDone)
-                    yield return null;
-
-                if (wwwAccessToken.result == UnityWebRequest.Result.Success)
+            List<KeyValuePojo> urlParams = new List<KeyValuePojo>();
+            urlParams.Add(new KeyValuePojo("client_id", ConstantIds.FB_APP_ID));
+            urlParams.Add(new KeyValuePojo("client_secret", ConstantIds.FB_APP_SECRET));
+            urlParams.Add(new KeyValuePojo("grant_type", "client_credentials"));
+            WebApiManager.Instance.GetNetWorkCall(NetworkCallType.GET_METHOD, "https://graph.facebook.com/oauth/access_token", urlParams, (bool isSuccess, string error, string body) => {
+                if (isSuccess)
                 {
-
-                    JSONNode result = JSONNode.Parse(wwwAccessToken.downloadHandler.text);
-
-                    using (UnityWebRequest www = UnityWebRequestTexture.GetTexture("https://graph.facebook.com/"+ facebookID + "/picture?type=large&access_token="+ result["access_token"]))
-                    {
-                        www.timeout = 30;
-                        //Send request
-                        yield return www.SendWebRequest();
-
-                        while (!www.isDone)
-                            yield return www;
-
-                        while (!www.downloadHandler.isDone)
-                            yield return null;
-
-                        if (www.result == UnityWebRequest.Result.Success)
+                    urlParams.Clear();
+                    JSONNode result = JSONNode.Parse(body);
+                    WebApiManager.Instance.GetDownloadImage("https://graph.facebook.com/" + facebookID + "/picture?type=large&access_token=" + result["access_token"], (bool isSuccess, string error, Texture2D imageTex) => {
+                        if (isSuccess)
                         {
-
-                            var imageTex = ((DownloadHandlerTexture)www.downloadHandler).texture;
-                            var _tex = DoReScaleTex(imageTex, 512, 512);
-                            Sprite sprite = CreateSpriteFromTex(imageTex, imageTex.width, imageTex.height);
-                            onSuccess.Invoke(sprite);
+                            //byte[] _bytes = imageTex.EncodeToPNG();
+                            //System.IO.File.WriteAllBytes(Application.persistentDataPath+"/"+facebookID+".png", _bytes);
+                            if (onSuccess != null)
+                            {
+                                var _tex = ImageCacheUtils.Instance.DoReScaleTex(imageTex, 512, 512);
+                                Sprite sprite = ImageCacheUtils.Instance.CreateSpriteFromTex(imageTex, imageTex.width, imageTex.height);
+                                onSuccess.Invoke(sprite);
+                            }
                         }
                         else
                         {
                             if (onError != null)
-                                onError.Invoke(www.error);
+                                onError.Invoke(error);
                         }
-                    }
+                    });
                 }
                 else
                 {
                     if (onError != null)
-                        onError.Invoke(wwwAccessToken.error);
+                        onError.Invoke(error);
                 }
-            }
+            });
         }
 
         public void GetProfilePicFB(string facebookID, Action<Sprite> onSuccess, Action<string> onError, int width = 512, int height = 512)
@@ -212,8 +192,8 @@ namespace OneDevApp
                         //System.IO.File.WriteAllBytes(Application.persistentDataPath+"/"+facebookID+"_12.png", _bytes);
                         if (onSuccess != null)
                         {
-                            var _tex = DoReScaleTex(result.Texture, width, height);
-                            Sprite sprite = CreateSpriteFromTex(result.Texture, result.Texture.width, result.Texture.height);
+                            var _tex = ImageCacheUtils.Instance.DoReScaleTex(result.Texture, width, height);
+                            Sprite sprite = ImageCacheUtils.Instance.CreateSpriteFromTex(result.Texture, result.Texture.width, result.Texture.height);
                             onSuccess.Invoke(sprite);
                         }
                     }
@@ -327,7 +307,12 @@ namespace OneDevApp
         #region Inviting
         public void FacebookAppRequest(string appRequestMsg, string appRequestTitle)
         {
-            FB.AppRequest(message: appRequestMsg, title: appRequestTitle);
+            FB.AppRequest(appRequestMsg,
+            null,
+            new List<object>() { "app_users" },
+            null, null, null, appRequestTitle, delegate (IAppRequestResult result) {
+                Debug.Log(result.RawResult);
+            });
         }
         #endregion
 
@@ -345,14 +330,18 @@ namespace OneDevApp
                 else
                 {
                     IDictionary<string, object> data = result.ResultDictionary;
-                    List<object> scores = (List<object>)data["data"];
+                    List<object> frineds = (List<object>)data["data"];
 
                     if (onSuccess != null)
-                        onSuccess.Invoke(scores);
+                        onSuccess.Invoke(frineds);
+
+                    foreach (object obj in frineds)
+                    {
+                        Debug.Log("GetFacebookFriends::" + ((Dictionary<string, object>)obj)["name"]);
+                    }
                 }
             });
 
-            //FB.API("/me/invitable_friends?limit=" + _Limit, HttpMethod.GET, GetFriendsListCallBack);
         }
 
 
@@ -395,6 +384,11 @@ namespace OneDevApp
 
                     if (onSuccess != null)
                         onSuccess.Invoke(scores);
+                    
+                    foreach (object obj in scores)
+                    {
+                        Dictionary<string, object> dictio = (Dictionary<string, object>)obj;
+                    }
                 }
             });
         }
@@ -404,18 +398,6 @@ namespace OneDevApp
         #endregion
 
         #region Helper Functions
-        public Sprite CreateSpriteFromTex(Texture2D spriteTexture, float width = 128f, float height = 128f)
-        {
-            return Sprite.Create(spriteTexture, new Rect(0, 0, width, height), Vector2.zero);
-        }
-
-        public Texture2D DoReScaleTex(Texture2D tex, int width, int height)
-        {
-            Texture2D scaled = new Texture2D(width, height, TextureFormat.BGRA32, true);
-            Graphics.ConvertTexture(tex, scaled);
-            return scaled;
-        }
-
         private string GetPublicDetailsURL(string facebookID)
         {
             string url = string.Format("/{0}", facebookID);

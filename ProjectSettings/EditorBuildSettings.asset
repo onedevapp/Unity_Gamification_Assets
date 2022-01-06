@@ -14,7 +14,4 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/OneDevApp/SceneLoader/Demo/Scene/SceneLoaderB.unity
     guid: 535885938cb1aba489460f1933c94f3d
-  - enabled: 0
-    path: Assets/OneDevApp/Location/Demo/Scenes/LocationDemo.unity
-    guid: 1fd896a82403f964c98ab7b844b87b22
   m_configObjects: {}

@@ -46,10 +46,5 @@ namespace OneDevApp
                 m_Instance = this as T;
             }
         }
-
-        protected virtual void OnDestroy()
-        {
-            m_Instance = null;
-        }
     }
 }

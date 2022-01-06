@@ -35,6 +35,7 @@ namespace OneDevApp
         public delegate void ReqCallbackTex(bool isSuccess, string error, Texture2D imageTex);
         private const int timeOut = 45;
 
+
         public void GetJsonNetWorkCall(string uri, string bodyJsonString, ReqCallback callback, int timeout = timeOut)
         {
             GetNetWorkCall(NetworkCallType.POST_METHOD_USING_JSONDATA, uri, bodyJsonString, null, callback, timeout);
@@ -70,6 +71,23 @@ namespace OneDevApp
             }
         }
 
+        public IEnumerator RequestWebMethod(string url, List<KeyValuePojo> parameters, ReqCallback callback, int timeout = timeOut)
+        {
+            string getParameters = getEncodedParams(parameters);
+
+            using (UnityWebRequest www = UnityWebRequest.Get(url + getParameters))
+            {
+                www.timeout = timeout;
+                //Send request
+                yield return www.SendWebRequest();
+
+                while (!www.isDone)
+                    yield return www;
+
+                //Return result
+                callback(www.result == UnityWebRequest.Result.Success, www.error, www.downloadHandler.text);
+            }
+        }
 
         private IEnumerator RequestGetMethod(string url, List<KeyValuePojo> parameters, ReqCallback callback, int timeout = timeOut)
         {
@@ -84,11 +102,7 @@ namespace OneDevApp
                 while (!www.isDone)
                     yield return www;
 
-                while (!www.downloadHandler.isDone)
-                    yield return null;
-
                 //Return result
-
 #if UNITY_2020_1_OR_NEWER
                 callback(www.result == UnityWebRequest.Result.Success, www.error, www.downloadHandler.text);
 #else
@@ -110,10 +124,6 @@ namespace OneDevApp
 
                 while (!www.isDone)
                     yield return www;
-
-                while (!www.downloadHandler.isDone)
-                    yield return null;
-                callback(www.isDone, www.error, www.downloadHandler.text);
 
                 //Return result
 #if UNITY_2020_1_OR_NEWER
@@ -139,9 +149,6 @@ namespace OneDevApp
 
                 while (!www.isDone)
                     yield return www;
-
-                while (!www.downloadHandler.isDone)
-                    yield return null;
 
                 //Return result
 #if UNITY_2020_1_OR_NEWER
@@ -180,7 +187,7 @@ namespace OneDevApp
             StringBuilder sb = new StringBuilder();
             foreach (KeyValuePojo items in parameters)
             {
-                string value =  UnityWebRequest.EscapeURL(items.value);
+                string value = UnityWebRequest.EscapeURL(items.value);
 
                 if (sb.Length > 0)
                 {
