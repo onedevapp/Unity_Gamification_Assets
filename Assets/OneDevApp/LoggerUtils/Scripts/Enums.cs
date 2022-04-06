@@ -1,5 +1,12 @@
-﻿namespace OneDevApp
+﻿namespace SwipeWire
 {
+    public enum LogType : byte
+    {
+        Log = 0,
+        Error = 1,
+        Warning = 2
+    }
+
     public enum LogLevel : byte
     {
         None = 0,

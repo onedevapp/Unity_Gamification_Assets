@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace OneDevApp
+namespace SwipeWire
 {
     /// <summary>
     /// Logger utility for logging custom error or log messages to
@@ -89,14 +90,14 @@ namespace OneDevApp
             EnableLogginOnDevice = isEnable;
         }
 
-        /// <summary>
+       /* /// <summary>
         /// Log an error to console and to the log file.
         /// </summary>
-        public static void LogError(string message)
+        public static void LogError(this Object myObj, params object[] msg)
         {
             if (!EnableLogginOnDevice) return;
 
-            string fullError = DateTime.Now.ToString("h:mm:ss tt") + ": ERROR: " + message;
+            string fullError = DateTime.Now.ToString("h:mm:ss tt") + ": ERROR: " + String.Join("; ", msg);
             Messages.Add(fullError);
 
             switch (profile.Output)
@@ -113,11 +114,11 @@ namespace OneDevApp
         /// <summary>
         /// Log a warning to the console and add to the log file.
         /// </summary>
-        public static void LogWarning(string message, LogLevel level = LogLevel.Normal)
+        public static void LogWarning(this Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
         {
             if (!EnableLogginOnDevice) return;
 
-            string fullWarn = DateTime.Now.ToString("h:mm:ss tt") + ": WARNING: " + message;
+            string fullWarn = DateTime.Now.ToString("h:mm:ss tt") + ": WARNING: " + String.Join("; ", msg);
             Messages.Add(fullWarn);
 
             if (level <= profile.Level && level > 0)
@@ -125,7 +126,7 @@ namespace OneDevApp
                 switch (profile.Output)
                 {
                     case LogOutput.Unity:
-                        Debug.LogWarning(fullWarn);
+                        Debug.LogWarning(fullWarn, myObj);
                         break;
                     case LogOutput.Console:
                         Console.WriteLine(fullWarn);
@@ -137,13 +138,12 @@ namespace OneDevApp
         /// <summary>
         /// Log a message to console and to the log file.
         /// </summary>
-        public static void Log(string message, LogLevel level = LogLevel.Normal)
+        public static void Log(this Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
         {
-            return;
             //Debug.Log(message);
             if (!EnableLogginOnDevice) return;
 
-            string fullLog = DateTime.Now.ToString("h:mm:ss tt") + ": " + message;
+            string fullLog = DateTime.Now.ToString("h:mm:ss tt") + ": " + String.Join("; ", msg);
             Messages.Add(fullLog);
 
             if (level <= profile.Level && level > 0)
@@ -151,14 +151,14 @@ namespace OneDevApp
                 switch (profile.Output)
                 {
                     case LogOutput.Unity:
-                        Debug.Log(fullLog);
+                        Debug.Log(fullLog, myObj);
                         break;
                     case LogOutput.Console:
                         Console.WriteLine(fullLog);
                         break;
                 }
             }
-        }
+        }*/
 
         /// <summary>
         /// Store all of the log calls made to file.
@@ -166,8 +166,6 @@ namespace OneDevApp
         public static void SaveLogFile()
         {
             if (!profile.SaveToFile) return;
-
-            Log("Saving log file");
 
             List<byte> logBytes = new List<byte>();
 
@@ -192,6 +190,112 @@ namespace OneDevApp
 
             Debug.Log("fullLogFileName::"+ fullLogFileName);
             FileUtils.SaveFile(logFullDirectory, fullLogFileName, logBytes.ToArray(), false);
+        }
+
+
+        /// <summary>
+        /// Helper function for color string
+        /// </summary>
+        private static string Color(this string myStr, string color)
+        {
+            return $"<color={color}>{myStr}</color>";
+        }
+
+
+        /// <summary>
+        /// Log a message to console and to the log file.
+        /// </summary>
+        private static void DoLog(LogType logType, string prefix, Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
+        {
+            if (!EnableLogginOnDevice) return;
+
+            var name = (myObj ? myObj.name : "NullObject").Color("lightblue");
+
+            string fullLog = DateTime.Now.ToString("h:mm:ss tt") + ": " + $"{prefix}[{name}]: {String.Join("; ", msg)}\n ";
+            Messages.Add(fullLog);
+
+
+            if ((level <= profile.Level && level > 0) || logType == LogType.Error)
+            {
+                switch (profile.Output)
+                {
+                    case LogOutput.Unity:
+                        if(logType == LogType.Log)
+                            Debug.Log(fullLog, myObj);
+                        else if(logType == LogType.Error)
+                            Debug.LogError(fullLog, myObj);
+                        else if(logType == LogType.Warning)
+                            Debug.LogWarning(fullLog, myObj);
+                        break;
+                    case LogOutput.Console:
+                        Console.WriteLine(fullLog);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Log a message to console and to the log file.
+        /// </summary>
+        public static void Log(Object myObj, params object[] msg)
+        {
+            Log(myObj, LogLevel.Normal, msg);
+        }
+
+        /// <summary>
+        /// Log an error to console and to the log file.
+        /// </summary>
+        public static void LogError(Object myObj, params object[] msg)
+        {
+            LogError(myObj, LogLevel.Normal, msg);
+        }
+
+        /// <summary>
+        /// Log a warning to the console and add to the log file.
+        /// </summary>
+        public static void LogWarning(Object myObj, params object[] msg)
+        {
+            LogWarning(myObj, LogLevel.Normal, msg);
+        }
+
+        /// <summary>
+        /// Log an success to console and to the log file.
+        /// </summary>
+        public static void LogSuccess(Object myObj, params object[] msg)
+        {
+            LogSuccess(myObj, LogLevel.Normal, msg);
+        }
+
+        /// <summary>
+        /// Log a message to console and to the log file.
+        /// </summary>
+        public static void Log(Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
+        {
+            DoLog(LogType.Log, "", myObj, level, msg);
+        }
+
+        /// <summary>
+        /// Log an error to console and to the log file.
+        /// </summary>
+        public static void LogError(Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
+        {
+            DoLog(LogType.Error, "<!>".Color("red"), myObj, level, msg);
+        }
+
+        /// <summary>
+        /// Log a warning to the console and add to the log file.
+        /// </summary>
+        public static void LogWarning(Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
+        {
+            DoLog(LogType.Warning, "⚠️".Color("yellow"), myObj, level, msg);
+        }
+
+        /// <summary>
+        /// Log an success to console and to the log file.
+        /// </summary>
+        public static void LogSuccess(Object myObj, LogLevel level = LogLevel.Normal, params object[] msg)
+        {
+            DoLog(LogType.Log, "☻".Color("green"), myObj, level, msg);
         }
     }
 }

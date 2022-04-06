@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace OneDevApp.LoggerUtil_Demo
+namespace SwipeWire.Demo
 {
 
 
@@ -19,17 +19,31 @@ namespace OneDevApp.LoggerUtil_Demo
         // Start is called before the first frame update
         void Start()
         {
-           
-            LoggerUtils.LogWarning("FirstLog");
+            Debug.LogWarning("FirstLog");
+            LoggerUtils.LogWarning(this, "FirstLog");
         }
 
         // Update is called once per frame
         void Update()
         {
+            if (Input.GetKeyDown(KeyCode.S))
+            {
+                tapCount++;
+                LoggerUtils.LogSuccess(this, "Success");
+
+            }
             if (Input.GetKeyDown(KeyCode.Space))
             {
                 tapCount++;
-                LoggerUtils.Log("Tap Count ::"+tapCount);
+                Debug.Log("Tap Count ::" + tapCount);
+                LoggerUtils.Log(this, "Tap Count ::" + tapCount);
+
+            }
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                tapCount++;
+                Debug.LogError("Pressed Escape!");
+                LoggerUtils.LogError(this, "Pressed Escape!");
 
             }
         }

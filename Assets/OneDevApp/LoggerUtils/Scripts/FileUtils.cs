@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace OneDevApp
+namespace SwipeWire
 {
     public class FileUtils
     {
