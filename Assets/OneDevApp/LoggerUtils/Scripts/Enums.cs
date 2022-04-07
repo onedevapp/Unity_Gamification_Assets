@@ -1,4 +1,4 @@
-﻿namespace SwipeWire
+﻿namespace OneDevApp
 {
     public enum LogType : byte
     {

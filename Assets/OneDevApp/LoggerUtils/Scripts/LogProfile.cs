@@ -1,7 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-namespace SwipeWire
+﻿namespace OneDevApp
 {
     /// <summary>
     /// Contains info regarding how the Logger

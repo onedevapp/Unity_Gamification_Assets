@@ -5,7 +5,7 @@ using System.Text;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace SwipeWire
+namespace OneDevApp
 {
     /// <summary>
     /// Logger utility for logging custom error or log messages to
